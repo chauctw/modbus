@@ -162,5 +162,20 @@ API liên quan:
 ## 8. Ghi chú khác
 - Đây là công cụ soạn thảo cấu hình + xem realtime; **không** ghi giá trị xuống PLC, không có chức năng điều khiển.
 - Bảng mã `TAG_DATA_TYPE` theo quy ước KEPServerEX: xem `datatypes.js`.
-#   m o d b u s  
- 
+
+
+
+function Show-Tree {
+    param(
+        [string]$Path = ".",
+        [string]$Indent = ""
+    )
+
+    Get-ChildItem $Path | Where-Object { $_.Name -ne "node_modules" } | ForEach-Object {
+        Write-Output "$Indent|-- $($_.Name)"
+        if ($_.PSIsContainer) {
+            Show-Tree $_.FullName ($Indent + "|   ")
+        }
+    }
+}
+Show-Tree | Out-File structure.txt -Encoding utf8

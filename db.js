@@ -55,7 +55,33 @@ CREATE TABLE IF NOT EXISTS tags (
   sort_order INTEGER DEFAULT 0,
   decimals INTEGER DEFAULT 2,
   realtime_enabled INTEGER DEFAULT 0,
+  tb_telemetry_enabled INTEGER DEFAULT 0,
+  tb_telemetry_interval_ms INTEGER DEFAULT 5000,
+  tb_attributes_enabled INTEGER DEFAULT 0,
+  tb_attributes_interval_ms INTEGER DEFAULT 5000,
   raw_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS thingsboard_devices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  host TEXT NOT NULL,
+  port INTEGER DEFAULT 80,
+  protocol TEXT DEFAULT 'http',
+  access_token TEXT NOT NULL,
+  device_name TEXT,
+  telemetry_interval_ms INTEGER DEFAULT 5000,
+  attributes_interval_ms INTEGER DEFAULT 5000,
+  request_timeout_ms INTEGER DEFAULT 5000,
+  enabled INTEGER DEFAULT 1,
+  sort_order INTEGER DEFAULT 0,
+  raw_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS tag_tb_devices (
+  tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+  tb_device_id INTEGER NOT NULL REFERENCES thingsboard_devices(id) ON DELETE CASCADE,
+  PRIMARY KEY (tag_id, tb_device_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_devices_channel ON devices(channel_id);
@@ -75,5 +101,34 @@ ensureColumn('devices', 'byte_swap', 'INTEGER DEFAULT 0');
 ensureColumn('devices', 'word_swap', 'INTEGER DEFAULT 0');
 ensureColumn('tags', 'decimals', 'INTEGER DEFAULT 2');
 ensureColumn('tags', 'realtime_enabled', 'INTEGER DEFAULT 0');
+ensureColumn('tags', 'tb_telemetry_enabled', 'INTEGER DEFAULT 0');
+ensureColumn('tags', 'tb_telemetry_interval_ms', 'INTEGER DEFAULT 5000');
+ensureColumn('tags', 'tb_attributes_enabled', 'INTEGER DEFAULT 0');
+ensureColumn('tags', 'tb_attributes_interval_ms', 'INTEGER DEFAULT 5000');
+ensureColumn('thingsboard_devices', 'telemetry_interval_ms', 'INTEGER DEFAULT 5000');
+ensureColumn('thingsboard_devices', 'attributes_interval_ms', 'INTEGER DEFAULT 5000');
+ensureColumn('thingsboard_devices', 'protocol', "TEXT DEFAULT 'http'");
+
+// Migration: đồng bộ cột protocol từ raw_json cho các DB cũ (trước đây protocol chỉ
+// nằm trong raw_json, không phải cột thật, khiến API GET không trả về được và form
+// Sửa luôn hiện lại HTTP mặc định dù thiết bị đã cấu hình HTTPS).
+(function migrateTbProtocol() {
+  const rows = db.prepare("SELECT id, raw_json, protocol FROM thingsboard_devices").all();
+  const updRaw = db.prepare('UPDATE thingsboard_devices SET raw_json=? WHERE id=?');
+  const updCol = db.prepare('UPDATE thingsboard_devices SET protocol=? WHERE id=?');
+  rows.forEach((r) => {
+    try {
+      const obj = JSON.parse(r.raw_json || '{}');
+      const protocolFromJson = obj.protocol === 'https' ? 'https' : null;
+      if (!r.protocol || r.protocol === 'http') {
+        if (protocolFromJson) updCol.run(protocolFromJson, r.id);
+      }
+      if (obj.protocol == null) {
+        obj.protocol = r.protocol || protocolFromJson || 'http';
+        updRaw.run(JSON.stringify(obj), r.id);
+      }
+    } catch (e) { /* ignore */ }
+  });
+})();
 
 module.exports = db;

@@ -1,0 +1,6 @@
+# Thư mục chứa log
+logs/*
+!logs/.gitkeep
+
+# Thư mục dependencies của Node.js
+node_modules/

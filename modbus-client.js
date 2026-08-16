@@ -5,6 +5,7 @@
 const ModbusRTU = require('modbus-serial');
 
 const pool = new Map(); // deviceId -> { client, connecting: Promise|null }
+const scanCache = new Map(); // deviceId -> { lastScanTime, values, tagIds }
 
 async function getConnection(device) {
   let entry = pool.get(device.id);
@@ -141,7 +142,7 @@ function applyScaling(rawValue, scalingRaw) {
 }
 
 /**
- * Đọc giá trị hiện tại của 1 tag từ PLC thật.
+ * Đọc giá trị hiện tại của 1 tag từ PLC thật (đọc riêng lẻ, dùng cho fallback/1 tag).
  * Trả về { value, scaledValue, quality: 'good'|'bad', error? }
  */
 async function readTagValue(client, tag, device) {
@@ -168,39 +169,149 @@ async function readTagValue(client, tag, device) {
     const count = registerCountForType(tag.data_type);
     const readFn = kind === 'holding_register' ? 'readHoldingRegisters' : 'readInputRegisters';
     const r = await client[readFn](protocolOffset, count);
-    const raw = decodeRegisters(r.data, tag.data_type, {
-      byteSwap: !!device.byte_swap,
-      wordSwap: !!device.word_swap,
-    });
-    const decimals = Number.isInteger(tag.decimals) ? tag.decimals : 2;
-    const isFloatType = tag.data_type === 8 || tag.data_type === 9; // Float / Double
-    const roundedRaw = isFloatType && typeof raw === 'number' ? roundTo(raw, decimals) : raw;
-
-    let scaledValue = null;
-    if (tag.scaling_type) {
-      const rawObj = JSON.parse(tag.raw_json);
-      const scaled = applyScaling(Number(raw), {
-        rawLow: rawObj['servermain.TAG_SCALING_RAW_LOW'],
-        rawHigh: rawObj['servermain.TAG_SCALING_RAW_HIGH'],
-        scaledLow: rawObj['servermain.TAG_SCALING_SCALED_LOW'],
-        scaledHigh: rawObj['servermain.TAG_SCALING_SCALED_HIGH'],
-      });
-      scaledValue = scaled != null ? roundTo(scaled, decimals) : null;
-    }
-
-    return {
-      value: typeof roundedRaw === 'bigint' ? roundedRaw.toString() : roundedRaw,
-      scaledValue,
-      quality: 'good',
-    };
+    return decodeTagFromRegs(r.data, tag);
   } catch (err) {
     return { value: null, quality: 'bad', error: err.message };
   }
 }
 
+// Giải mã 1 tag từ mảng register đã đọc được (dùng chung cho đọc lẻ và đọc theo block)
+function decodeTagFromRegs(regs, tag, device = {}) {
+  const raw = decodeRegisters(regs, tag.data_type, {
+    byteSwap: !!device.byte_swap,
+    wordSwap: !!device.word_swap,
+  });
+  const decimals = Number.isInteger(tag.decimals) ? tag.decimals : 2;
+  const isFloatType = tag.data_type === 8 || tag.data_type === 9; // Float / Double
+  const roundedRaw = isFloatType && typeof raw === 'number' ? roundTo(raw, decimals) : raw;
+
+  let scaledValue = null;
+  if (tag.scaling_type) {
+    const rawObj = JSON.parse(tag.raw_json);
+    const scaled = applyScaling(Number(raw), {
+      rawLow: rawObj['servermain.TAG_SCALING_RAW_LOW'],
+      rawHigh: rawObj['servermain.TAG_SCALING_RAW_HIGH'],
+      scaledLow: rawObj['servermain.TAG_SCALING_SCALED_LOW'],
+      scaledHigh: rawObj['servermain.TAG_SCALING_SCALED_HIGH'],
+    });
+    scaledValue = scaled != null ? roundTo(scaled, decimals) : null;
+  }
+
+  return {
+    value: typeof roundedRaw === 'bigint' ? roundedRaw.toString() : roundedRaw,
+    scaledValue,
+    quality: 'good',
+  };
+}
+
+// ---- Gộp nhiều tag thành ít lệnh đọc Modbus hơn (quan trọng khi có hàng nghìn tag) ----
+// Thay vì đọc từng tag 1 lệnh riêng, gộp các tag có address gần nhau (cùng vùng nhớ)
+// thành 1 khối liên tục rồi đọc 1 lần, sau đó cắt buffer ra cho từng tag.
+const MAX_REGS_PER_BLOCK = 120; // an toàn dưới giới hạn Modbus (125 register/lần)
+const MAX_REG_GAP = 10; // cho phép "nuốt" tối đa 10 register trống giữa 2 tag để gộp khối
+const MAX_BITS_PER_BLOCK = 1968; // an toàn dưới giới hạn 2000 coil/discrete input mỗi lần
+const MAX_BIT_GAP = 16;
+
+function buildBlocks(items, maxSpan, maxGap) {
+  // items: [{ start, span, ...bất kỳ field nào khác }] đã biết offset (start) và số ô chiếm (span)
+  const sorted = [...items].sort((a, b) => a.start - b.start || a.span - b.span);
+  const blocks = [];
+  let current = null;
+  for (const it of sorted) {
+    const itEnd = it.start + it.span;
+    if (current && it.start - current.end <= maxGap && (itEnd - current.start) <= maxSpan) {
+      current.end = Math.max(current.end, itEnd);
+      current.items.push(it);
+    } else {
+      if (current) blocks.push(current);
+      current = { start: it.start, end: itEnd, items: [it] };
+    }
+  }
+  if (current) blocks.push(current);
+  return blocks;
+}
+
+/**
+ * Đọc nhiều tag cùng lúc trên 1 device (1 socket), gộp các tag liền/gần nhau thành
+ * ít lệnh Modbus nhất có thể thay vì 1 lệnh/tag. Giảm mạnh số round-trip khi có
+ * hàng nghìn tag trên cùng 1 device.
+ */
+async function readTagsBatch(client, tags, device) {
+  const result = {};
+  const groups = { coil: [], discrete_input: [], holding_register: [], input_register: [] };
+
+  tags.forEach((tag) => {
+    try {
+      const { kind, protocolOffset, bit } = parseAddress(tag.address);
+      if (kind === 'coil' || kind === 'discrete_input') {
+        groups[kind].push({ tag, start: protocolOffset, span: 1, bit: null });
+        return;
+      }
+      if (bit != null) {
+        groups[kind].push({ tag, start: protocolOffset, span: 1, bit });
+        return;
+      }
+      const span = registerCountForType(tag.data_type);
+      groups[kind].push({ tag, start: protocolOffset, span, bit: null });
+    } catch (err) {
+      result[tag.id] = { value: null, quality: 'bad', error: err.message };
+    }
+  });
+
+  // coil / discrete_input: đọc theo bit, gộp khối theo MAX_BITS_PER_BLOCK
+  for (const kind of ['coil', 'discrete_input']) {
+    const items = groups[kind];
+    if (!items.length) continue;
+    const blocks = buildBlocks(items, MAX_BITS_PER_BLOCK, MAX_BIT_GAP);
+    const readFn = kind === 'coil' ? 'readCoils' : 'readDiscreteInputs';
+    for (const block of blocks) {
+      try {
+        const r = await client[readFn](block.start, block.end - block.start);
+        block.items.forEach((it) => {
+          result[it.tag.id] = { value: !!r.data[it.start - block.start], quality: 'good' };
+        });
+      } catch (err) {
+        block.items.forEach((it) => {
+          result[it.tag.id] = { value: null, quality: 'bad', error: err.message };
+        });
+      }
+    }
+  }
+
+  // holding_register / input_register: gộp khối theo MAX_REGS_PER_BLOCK
+  for (const kind of ['holding_register', 'input_register']) {
+    const items = groups[kind];
+    if (!items.length) continue;
+    const blocks = buildBlocks(items, MAX_REGS_PER_BLOCK, MAX_REG_GAP);
+    const readFn = kind === 'holding_register' ? 'readHoldingRegisters' : 'readInputRegisters';
+    for (const block of blocks) {
+      try {
+        const r = await client[readFn](block.start, block.end - block.start);
+        block.items.forEach((it) => {
+          const idx = it.start - block.start;
+          if (it.bit != null) {
+            const word = r.data[idx];
+            result[it.tag.id] = { value: ((word >> it.bit) & 1) === 1, quality: 'good' };
+            return;
+          }
+          const regsSlice = r.data.slice(idx, idx + it.span);
+          result[it.tag.id] = decodeTagFromRegs(regsSlice, it.tag, device);
+        });
+      } catch (err) {
+        block.items.forEach((it) => {
+          result[it.tag.id] = { value: null, quality: 'bad', error: err.message };
+        });
+      }
+    }
+  }
+
+  return result;
+}
+
 /**
  * Đọc nhiều tag của CÙNG 1 device (tuần tự trên 1 kết nối - Modbus TCP không hỗ trợ
  * nhiều giao dịch song song trên cùng 1 socket một cách an toàn).
+ * Sử dụng cache theo scan_rate_ms của thiết bị để tránh đọc PLC quá nhanh.
  */
 async function readTagsForDevice(device, tags) {
   let client;
@@ -212,10 +323,24 @@ async function readTagsForDevice(device, tags) {
     return result;
   }
 
-  const result = {};
-  for (const tag of tags) {
-    result[tag.id] = await readTagValue(client, tag, device);
+  const cacheKey = String(device.id);
+  const cached = scanCache.get(cacheKey);
+  const scanRate = Number(device.scan_rate_ms) > 0 ? Number(device.scan_rate_ms) : 1000;
+  const now = Date.now();
+  const currentTagIds = tags.map((t) => t.id);
+
+  if (cached && (now - cached.lastScanTime < scanRate) && cached.tagIds.length === currentTagIds.length && cached.tagIds.every((id, i) => id === currentTagIds[i])) {
+    return cached.values;
   }
+
+  const result = await readTagsBatch(client, tags, device);
+
+  scanCache.set(cacheKey, {
+    lastScanTime: now,
+    values: result,
+    tagIds: currentTagIds,
+  });
+
   return result;
 }
 

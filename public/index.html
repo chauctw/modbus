@@ -16,6 +16,8 @@
       </label>
       <button class="btn" id="exportBtn">Export JSON</button>
       <button class="btn btn-danger" id="resetBtn">Reset</button>
+      <button class="btn" id="addChannelBtn">+ Channel</button>
+      <button class="btn" id="addTbBtn">+ Thiết bị TB</button>
     </div>
   </header>
 
@@ -25,7 +27,6 @@
     <aside class="sidebar">
       <input type="text" id="treeSearch" placeholder="Tìm channel / device..." />
       <div id="tree" class="tree"></div>
-      <button class="btn btn-block" id="addChannelBtn">+ Channel</button>
     </aside>
 
     <section class="content">
@@ -46,14 +47,29 @@
         <button class="btn" id="addTagBtn">+ Tag</button>
         <button class="btn" id="bulkAddBtn">+ Nhiều tag (CSV)</button>
         <button class="btn" id="bulkDeleteBtn" disabled>Xoá đã chọn</button>
-        <button class="btn" id="bulkScanRateBtn" disabled>Sửa Scan Rate hàng loạt</button>
         <button class="btn" id="filterOnBtn">Chỉ tag ON</button>
+        <button class="btn" id="filterTbBtn">Chỉ tag TB</button>
         <span id="realtimeStatus" class="muted"></span>
         <span id="tagCountLabel" class="muted"></span>
       </div>
 
       <div id="tagTableWrap" class="table-wrap">
         <table id="tagTable" style="display:none">
+          <colgroup>
+            <col style="width:40px" />
+            <col style="width:50px" />
+            <col style="width:auto" />
+            <col style="width:110px" />
+            <col style="width:90px" />
+            <col class="col-rw" style="width:90px" />
+            <col class="col-scaling" style="width:80px" />
+            <col style="width:80px" />
+            <col style="width:160px" />
+            <col style="width:90px" />
+            <col style="width:90px" />
+            <col style="width:auto" />
+            <col style="width:90px" />
+          </colgroup>
           <thead>
           <tr>
             <th><input type="checkbox" id="selectAllTags" /></th>
@@ -62,14 +78,51 @@
             <th data-sort="address">Address</th>
             <th data-sort="data_type">Data Type</th>
             <th data-sort="rw_access">R/W</th>
-            <th data-sort="scan_rate_ms">Scan (ms)</th>
-            <th>Scaling</th>
+            <th class="col-scaling">Scaling</th>
             <th>Realtime</th>
             <th>Giá trị Realtime</th>
-            <th></th>
+            <th>Telemetry</th>
+            <th>Attributes</th>
+            <th>Thiết bị TB</th>
+            <th>Thao tác</th>
           </tr>
           </thead>
           <tbody id="tagTableBody"></tbody>
+        </table>
+      </div>
+      <div id="tbDeviceTableWrap" class="table-wrap" style="display:none">
+        <table id="tbDeviceTable">
+          <colgroup>
+            <col style="width:50px" />
+            <col style="width:auto" />
+            <col style="width:130px" />
+            <col style="width:70px" />
+            <col style="width:auto" />
+            <col style="width:110px" />
+            <col style="width:70px" />
+            <col style="width:100px" />
+            <col style="width:100px" />
+            <col style="width:100px" />
+            <col style="width:90px" />
+            <col style="width:90px" />
+          </colgroup>
+          <thead>
+          <tr>
+            <th>STT</th>
+            <th>Tên</th>
+            <th>Host</th>
+            <th>Port</th>
+            <th>Access Token</th>
+            <th>Device Name</th>
+            <th>Protocol</th>
+            <th>Telemetry (ms)</th>
+            <th>Attributes (ms)</th>
+            <th>Timeout (ms)</th>
+            <th>Trạng thái</th>
+            <th>Thao tác</th>
+          </tr>
+          </thead>
+          <tbody id="tbDeviceTableBody"></tbody>
         </table>
       </div>
       <div id="tagPagination" class="pagination"></div>

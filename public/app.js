@@ -13,9 +13,11 @@ let state = {
   realtimeEnabled: false,
   realtimeTimer: null,
   realtimeFilter: false,
+  tbDevices: [],
+  tbFilter: false,
 };
 
-const REALTIME_POLL_MS = 2000;
+let realtimePollMs = 2000;
 
 const $ = (sel) => document.querySelector(sel);
 const modalRoot = $('#modalRoot');
@@ -47,7 +49,7 @@ async function loadDashboard() {
     validation.dupDeviceNames.length + validation.dupChannelNames.length +
     validation.emptyAddressCount + stats.duplicateIPs.length;
 
-  const fastScan = stats.byScanRate.filter(r => r.scan_rate_ms != null && r.scan_rate_ms <= 100)
+  const fastScan = stats.byDeviceScanRate.filter(r => r.scan_rate_ms != null && r.scan_rate_ms <= 100)
     .reduce((s, r) => s + r.count, 0);
 
   el.innerHTML = `
@@ -70,6 +72,7 @@ function renderTree() {
   const treeEl = $('#tree');
   treeEl.innerHTML = '';
 
+  // Modbus channels
   state.tree.forEach((ch) => {
     if (ch.name === '__REALTIME__') return;
     const devices = ch.devices.filter((d) => !filter || d.name.toLowerCase().includes(filter) || ch.name.toLowerCase().includes(filter));
@@ -94,6 +97,7 @@ function renderTree() {
       row.className = 'tree-device-row' + (d.id === state.currentDeviceId ? ' active' : '');
       row.dataset.device = d.id;
       row.dataset.channel = ch.id;
+      row.dataset.type = 'modbus';
       row.innerHTML = `<span>🖥 ${escapeHtml(d.name)}</span><span class="badge">${d.tagCount}</span>`;
       row.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -128,6 +132,62 @@ function renderTree() {
     });
     treeEl.appendChild(chDiv);
   });
+
+  // ThingsBoard section
+  const tbSection = document.createElement('div');
+  tbSection.className = 'tree-channel';
+  const tbDevices = state.tbDevices.filter((tb) => !filter || tb.name.toLowerCase().includes(filter));
+  const tbIsExpanded = expandedChannels.has('__tb__') || state.currentChannelId === '__tb__';
+  tbSection.innerHTML = `
+    <div class="tree-channel-row ${tbIsExpanded ? 'expanded' : ''}" data-channel="__tb__">
+      <span class="tree-channel-toggle">▶</span>
+      <span class="tree-channel-name">📡 ThingsBoard</span>
+      <span class="badge">${tbDevices.length} device</span>
+      <button class="tree-channel-actions" title="Thêm thiết bị TB">+</button>
+    </div>
+    <div class="tree-devices ${tbIsExpanded ? '' : 'collapsed'}"></div>
+  `;
+  const tbDevicesEl = tbSection.querySelector('.tree-devices');
+  tbDevices.forEach((tb) => {
+    const row = document.createElement('div');
+    row.className = 'tree-device-row' + (state.currentDeviceId === `tb-${tb.id}` ? ' active' : '');
+    row.dataset.device = `tb-${tb.id}`;
+    row.dataset.channel = '__tb__';
+    row.dataset.type = 'thingsboard';
+    row.innerHTML = `<span>🔌 ${escapeHtml(tb.name)}</span><span class="badge">${tb.enabled ? 'Bật' : 'Tắt'}</span>`;
+    row.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectTbDevice(tb);
+    });
+    tbDevicesEl.appendChild(row);
+  });
+
+  tbSection.querySelector('.tree-channel-toggle').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (expandedChannels.has('__tb__')) {
+      expandedChannels.delete('__tb__');
+    } else {
+      expandedChannels.add('__tb__');
+    }
+    renderTree();
+  });
+
+  tbSection.querySelector('.tree-channel-name').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (expandedChannels.has('__tb__')) {
+      expandedChannels.delete('__tb__');
+    } else {
+      expandedChannels.add('__tb__');
+    }
+    renderTree();
+  });
+
+  tbSection.querySelector('.tree-channel-actions').addEventListener('click', (e) => {
+    e.stopPropagation();
+    openTbDeviceForm();
+  });
+
+  treeEl.appendChild(tbSection);
 }
 
 function openChannelMenu(ch) {
@@ -188,6 +248,10 @@ $('#addChannelBtn').addEventListener('click', () => {
   };
 });
 
+$('#addTbBtn').addEventListener('click', () => {
+  openTbDeviceForm();
+});
+
 $('#treeSearch').addEventListener('input', renderTree);
 
 // ---------- DEVICE ----------
@@ -203,10 +267,15 @@ async function selectDevice(channelId, deviceId) {
   expandedChannels.clear();
   expandedChannels.add(String(channelId));
   renderTree();
+  await loadTbDevices();
   const dev = await api(`/api/devices/${deviceId}`);
+  realtimePollMs = Number(dev.scan_rate_ms) > 0 ? Number(dev.scan_rate_ms) : 2000;
   $('#emptyState').style.display = 'none';
   $('#deviceHeader').style.display = 'flex';
   $('#tagToolbar').style.display = 'flex';
+  $('#tagTableWrap').style.display = 'block';
+  $('#tagPagination').style.display = 'block';
+  $('#tbDeviceTableWrap').style.display = 'none';
   $('#deviceTitle').textContent = dev.name;
   $('#deviceMeta').textContent = `IP: ${dev.ip || '-'} | Slave ID: ${dev.slave_id ?? '-'} | Scan: ${dev.scan_rate_ms}ms | Timeout: ${dev.conn_timeout_s}s / ${dev.req_timeout_ms}ms | Byte Swap: ${dev.byte_swap ? 'Bật' : 'Tắt'} | Word Swap: ${dev.word_swap ? 'Bật' : 'Tắt'}`;
 
@@ -230,12 +299,42 @@ function showEmptyState() {
   $('#emptyState').style.display = 'block';
   $('#deviceHeader').style.display = 'none';
   $('#tagToolbar').style.display = 'none';
-  $('#tagTable').style.display = 'none';
-  $('#tagPagination').innerHTML = '';
+  $('#tagTableWrap').style.display = 'none';
+  $('#tagPagination').style.display = 'none';
+  $('#tbDeviceTableWrap').style.display = 'none';
   expandedChannels.clear();
   state.currentChannelId = null;
   state.currentDeviceId = null;
   renderTree();
+}
+
+async function selectTbDevice(tb) {
+  stopRealtime();
+  state.currentChannelId = '__tb__';
+  state.currentDeviceId = `tb-${tb.id}`;
+  state.page = 1;
+  state.selected.clear();
+  expandedChannels.clear();
+  expandedChannels.add('__tb__');
+  renderTree();
+  await loadTbDevices();
+  $('#emptyState').style.display = 'none';
+  $('#deviceHeader').style.display = 'flex';
+  $('#tagToolbar').style.display = 'none';
+  $('#deviceTitle').textContent = `📡 ${tb.name}`;
+  $('#deviceMeta').textContent = `Host: ${tb.host}:${tb.port} | Token: ${tb.access_token} | Device: ${tb.device_name || '-'} | Telemetry: ${tb.telemetry_interval_ms}ms | Attributes: ${tb.attributes_interval_ms}ms | ${tb.enabled ? 'Bật' : 'Tắt'}`;
+
+  $('#editDeviceBtn').style.display = 'none';
+  $('#duplicateDeviceBtn').style.display = 'none';
+  $('#deleteDeviceBtn').style.display = 'none';
+  $('#editDeviceBtn').onclick = null;
+  $('#duplicateDeviceBtn').onclick = null;
+  $('#deleteDeviceBtn').onclick = null;
+
+  $('#tagTableWrap').style.display = 'none';
+  $('#tagPagination').style.display = 'none';
+  $('#tbDeviceTableWrap').style.display = 'block';
+  renderTbDeviceList(state.tbDevices);
 }
 
 function openDeviceForm(channelId, dev = null) {
@@ -304,6 +403,101 @@ function openDuplicateForm(dev) {
   };
 }
 
+async function loadTbDevices() {
+  state.tbDevices = await api('/api/thingsboard-devices');
+}
+
+function renderTbDeviceList(tbDevices) {
+  const tbody = $('#tbDeviceTableBody');
+  tbody.innerHTML = '';
+  tbDevices.forEach((tb, idx) => {
+    const tr = document.createElement('tr');
+    tr.dataset.id = tb.id;
+    tr.innerHTML = `
+      <td class="muted">${idx + 1}</td>
+      <td>${escapeHtml(tb.name)}</td>
+      <td>${escapeHtml(tb.host)}</td>
+      <td class="muted">${tb.port}</td>
+      <td><span style="font-family:monospace">${escapeHtml(tb.access_token)}</span></td>
+      <td class="muted">${escapeHtml(tb.device_name || '-')}</td>
+      <td class="muted">${tb.protocol === 'https' ? 'HTTPS' : 'HTTP'}</td>
+      <td class="muted">${tb.telemetry_interval_ms}</td>
+      <td class="muted">${tb.attributes_interval_ms}</td>
+      <td class="muted">${tb.request_timeout_ms}</td>
+      <td>${tb.enabled ? '<span class="badge on">Bật</span>' : '<span class="badge off">Tắt</span>'}</td>
+      <td class="row-actions">
+        <button class="icon-btn edit-btn" title="Sửa">⚙</button>
+        <button class="icon-btn del-btn" title="Xoá">🗑</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+    tr.querySelector('.edit-btn').addEventListener('click', () => openTbDeviceForm(tb));
+    tr.querySelector('.del-btn').addEventListener('click', async () => {
+      if (!confirm(`Xoá thiết bị ThingsBoard "${tb.name}"?`)) return;
+      await api(`/api/thingsboard-devices/${tb.id}`, { method: 'DELETE' });
+      await loadTbDevices();
+      if (state.currentDeviceId === `tb-${tb.id}`) {
+        showEmptyState();
+      } else if (state.currentDeviceId && String(state.currentDeviceId).startsWith('tb-')) {
+        renderTbDeviceList(state.tbDevices);
+      }
+    });
+  });
+}
+
+function openTbDeviceForm(tb = null) {
+  const isEdit = !!tb;
+  openModal(`
+    <h3>${isEdit ? 'Sửa' : 'Thêm'} Thiết bị ThingsBoard</h3>
+    <div class="field"><label>Tên</label><input id="f-name" value="${tb ? escapeHtml(tb.name) : ''}" /></div>
+    <div class="field-row">
+      <div class="field"><label>Host</label><input id="f-host" value="${tb ? escapeHtml(tb.host) : ''}" placeholder="192.168.1.100" /></div>
+      <div class="field"><label>Cổng</label><input id="f-port" type="number" value="${tb ? tb.port || 80 : 80}" /></div>
+    </div>
+    <div class="field"><label>Giao thức</label>
+      <select id="f-protocol">
+        <option value="http" ${tb && tb.protocol === 'https' ? '' : 'selected'}>HTTP</option>
+        <option value="https" ${tb && tb.protocol === 'https' ? 'selected' : ''}>HTTPS</option>
+      </select>
+    </div>
+    <div class="field"><label>Access Token</label><input id="f-token" value="${tb ? escapeHtml(tb.access_token) : ''}" /></div>
+    <div class="field"><label>Device Name (tùy chọn)</label><input id="f-device-name" value="${tb ? escapeHtml(tb.device_name || '') : ''}" /></div>
+    <div class="field-row">
+      <div class="field"><label>Chu kỳ Telemetry (ms)</label><input id="f-telemetry-interval" type="number" value="${tb ? tb.telemetry_interval_ms || 5000 : 5000}" /></div>
+      <div class="field"><label>Chu kỳ Attributes (ms)</label><input id="f-attributes-interval" type="number" value="${tb ? tb.attributes_interval_ms || 5000 : 5000}" /></div>
+    </div>
+    <div class="field"><label>Request Timeout (ms)</label><input id="f-timeout" type="number" value="${tb ? tb.request_timeout_ms || 5000 : 5000}" /></div>
+    <div class="checkbox-inline"><input type="checkbox" id="f-enabled" ${!tb || tb.enabled ? 'checked' : ''} /> <label for="f-enabled">Bật</label></div>
+    <div id="err" class="error-text"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Huỷ</button>
+      <button class="btn btn-primary" id="save">Lưu</button>
+    </div>
+  `);
+  $('#save').onclick = async () => {
+    const body = {
+      name: $('#f-name').value,
+      host: $('#f-host').value,
+      port: Number($('#f-port').value),
+      access_token: $('#f-token').value,
+      device_name: $('#f-device-name').value,
+      protocol: $('#f-protocol').value,
+      telemetry_interval_ms: Number($('#f-telemetry-interval').value),
+      attributes_interval_ms: Number($('#f-attributes-interval').value),
+      request_timeout_ms: Number($('#f-timeout').value),
+      enabled: $('#f-enabled').checked,
+    };
+    try {
+      if (isEdit) await api(`/api/thingsboard-devices/${tb.id}`, { method: 'PUT', body: JSON.stringify(body) });
+      else await api('/api/thingsboard-devices', { method: 'POST', body: JSON.stringify(body) });
+      closeModal(); await loadTbDevices();
+      if (state.currentDeviceId && String(state.currentDeviceId).startsWith('tb-')) {
+        renderTbDeviceList(state.tbDevices);
+      }
+    } catch (e) { $('#err').textContent = e.message; }
+  };
+}
+
 // ---------- TAGS TABLE ----------
 let dataTypesCache = null;
 async function getDataTypes() {
@@ -311,57 +505,76 @@ async function getDataTypes() {
   return dataTypesCache;
 }
 
+// Tự co giãn width của input theo đúng nội dung đang có (tính theo ký tự "ch"),
+// để table-layout:auto co cột vừa khít nội dung thay vì luôn chiếm 100% cột.
+function autoSizeCellInput(el) {
+  if (!el) return;
+  const len = (el.value || '').length;
+  el.style.width = Math.max(4, len + 2) + 'ch';
+}
+
 async function loadTags() {
   const dataTypes = await getDataTypes();
   const q = new URLSearchParams({
     search: state.tagSearch, sort: state.sort, dir: state.dir, page: state.page, pageSize: state.pageSize,
     realtime: state.realtimeFilter ? 1 : 0,
+    tb: state.tbFilter ? 1 : 0,
   });
-  const { total, rows } = await api(`/api/devices/${state.currentDeviceId}/tags?${q}`);
+  const isTbDevice = state.currentDeviceId && String(state.currentDeviceId).startsWith('tb-');
+  const endpoint = isTbDevice ? `/api/tb-devices/${state.currentDeviceId.replace('tb-', '')}/tags?${q}` : `/api/devices/${state.currentDeviceId}/tags?${q}`;
+  const { total, rows } = await api(endpoint);
   $('#tagCountLabel').textContent = `${total} tag`;
   $('#filterOnBtn').classList.toggle('btn-primary', state.realtimeFilter);
+  $('#filterTbBtn').classList.toggle('btn-primary', state.tbFilter);
   $('#tagTable').style.display = 'table';
 
   const tbody = $('#tagTableBody');
   tbody.innerHTML = '';
-  rows.forEach((tag, idx) => {
-    const tr = document.createElement('tr');
-    tr.dataset.id = tag.id;
-    const stt = (state.page - 1) * state.pageSize + idx + 1;
-    const scalingLabel = tag.scaling_type ? 'Linear' : 'None';
-    const rtClass = tag.realtime_enabled ? 'on' : 'off';
-    tr.innerHTML = `
-      <td class="muted">${stt}</td>
-      <td><input type="checkbox" class="row-check" ${state.selected.has(tag.id) ? 'checked' : ''} /></td>
-      <td><input type="text" class="cell-name" value="${escapeHtml(tag.name)}" /></td>
-      <td><input type="text" class="cell-address" value="${escapeHtml(tag.address || '')}" /></td>
-      <td>
-        <select class="cell-datatype">
-          ${Object.entries(dataTypes).map(([code, n]) => `<option value="${code}" ${Number(code) === tag.data_type ? 'selected' : ''}>${n}</option>`).join('')}
-        </select>
-      </td>
-      <td>
-        <select class="cell-rw">
-          <option value="0" ${tag.rw_access === 0 ? 'selected' : ''}>Read Only</option>
-          <option value="1" ${tag.rw_access === 1 ? 'selected' : ''}>Read/Write</option>
-        </select>
-      </td>
-      <td><input type="number" class="cell-scan" value="${tag.scan_rate_ms ?? ''}" /></td>
-      <td class="muted">${scalingLabel}</td>
-      <td><button class="rt-toggle ${rtClass}" data-tag-id="${tag.id}">${tag.realtime_enabled ? 'ON' : 'OFF'}</button></td>
-      <td class="cell-live"><span class="live-value"><span class="live-dot"></span><span class="live-text muted">—</span></span></td>
-      <td class="row-actions">
-        <button class="icon-btn edit-btn" title="Sửa chi tiết (scaling)">⚙</button>
-        <button class="icon-btn del-btn" title="Xoá">🗑</button>
-      </td>
-    `;
+rows.forEach((tag, idx) => {
+     const tr = document.createElement('tr');
+     tr.dataset.id = tag.id;
+     const stt = (state.page - 1) * state.pageSize + idx + 1;
+     const scalingLabel = tag.scaling_type ? 'Linear' : 'None';
+     const rtClass = tag.realtime_enabled ? 'on' : 'off';
+     const tbTelemetryClass = tag.tb_telemetry_enabled ? 'on' : 'off';
+     const tbAttributesClass = tag.tb_attributes_enabled ? 'on' : 'off';
+     const tbNames = (tag.tb_devices || []).map((tb) => tb.name).join(', ') || '—';
+     tr.innerHTML = `
+       <td><input type="checkbox" class="row-check" ${state.selected.has(tag.id) ? 'checked' : ''} /></td>
+       <td class="muted">${stt}</td>
+       <td><input type="text" class="cell-name" value="${escapeHtml(tag.name)}" /></td>
+       <td><input type="text" class="cell-address" value="${escapeHtml(tag.address || '')}" /></td>
+       <td>
+         <select class="cell-datatype">
+           ${Object.entries(dataTypes).map(([code, n]) => `<option value="${code}" ${Number(code) === tag.data_type ? 'selected' : ''}>${n}</option>`).join('')}
+         </select>
+       </td>
+         <td>
+           <select class="cell-rw">
+             <option value="0" ${tag.rw_access === 0 ? 'selected' : ''}>Read Only</option>
+             <option value="1" ${tag.rw_access === 1 ? 'selected' : ''}>Read/Write</option>
+           </select>
+         </td>
+          <td class="muted col-scaling">${scalingLabel}</td>
+       <td><button class="rt-toggle ${rtClass}" data-tag-id="${tag.id}">${tag.realtime_enabled ? 'ON' : 'OFF'}</button></td>
+       <td class="cell-live"><span class="live-value"><span class="live-dot"></span><span class="live-text muted">—</span></span></td>
+       <td><button class="rt-toggle ${tbTelemetryClass}" data-tb-telemetry-id="${tag.id}">${tag.tb_telemetry_enabled ? 'ON' : 'OFF'}</button></td>
+       <td><button class="rt-toggle ${tbAttributesClass}" data-tb-attributes-id="${tag.id}">${tag.tb_attributes_enabled ? 'ON' : 'OFF'}</button></td>
+       <td class="cell-tb-devices" data-tag-id="${tag.id}" style="cursor:pointer;color:var(--accent)">${escapeHtml(tbNames)}</td>
+       <td class="row-actions">
+         <button class="icon-btn edit-btn" title="Sửa chi tiết (scaling)">⚙</button>
+         <button class="icon-btn del-btn" title="Xoá">🗑</button>
+       </td>
+     `;
     tbody.appendChild(tr);
+    autoSizeCellInput(tr.querySelector('.cell-name'));
+    autoSizeCellInput(tr.querySelector('.cell-address'));
 
     tr.querySelector('.row-check').addEventListener('change', (e) => {
       if (e.target.checked) state.selected.add(tag.id); else state.selected.delete(tag.id);
       updateBulkButtons();
     });
-    tr.querySelector('.rt-toggle').addEventListener('click', async (e) => {
+    tr.querySelector('[data-tag-id]').addEventListener('click', async (e) => {
       const btn = e.currentTarget;
       const isOn = btn.classList.contains('on');
       const newState = isOn ? 0 : 1;
@@ -369,13 +582,39 @@ async function loadTags() {
         await api(`/api/tags/${tag.id}`, { method: 'PUT', body: JSON.stringify({ realtime_enabled: newState }) });
         await loadTags();
         await loadTree();
-        const anyOn = document.querySelectorAll('#tagTableBody .rt-toggle.on').length > 0;
-        if (!anyOn) stopRealtime();
-        else if (!state.realtimeEnabled) startRealtime();
       } catch (err) {
         alert(err.message);
         loadTags();
       }
+    });
+    tr.querySelector('[data-tb-telemetry-id]').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const isOn = btn.classList.contains('on');
+      const newState = isOn ? 0 : 1;
+      try {
+        await api(`/api/tags/${tag.id}`, { method: 'PUT', body: JSON.stringify({ tb_telemetry_enabled: newState }) });
+        await loadTags();
+        await loadTree();
+      } catch (err) {
+        alert(err.message);
+        loadTags();
+      }
+    });
+    tr.querySelector('[data-tb-attributes-id]').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const isOn = btn.classList.contains('on');
+      const newState = isOn ? 0 : 1;
+      try {
+        await api(`/api/tags/${tag.id}`, { method: 'PUT', body: JSON.stringify({ tb_attributes_enabled: newState }) });
+        await loadTags();
+        await loadTree();
+      } catch (err) {
+        alert(err.message);
+        loadTags();
+      }
+    });
+    tr.querySelector('.cell-tb-devices').addEventListener('click', async () => {
+      await openTbDeviceSelect(tag);
     });
     tr.querySelector('.edit-btn').addEventListener('click', () => openTagForm(tag));
     tr.querySelector('.del-btn').addEventListener('click', async () => {
@@ -383,9 +622,15 @@ async function loadTags() {
       await api(`/api/tags/${tag.id}`, { method: 'DELETE' });
       await loadTags(); await loadTree(); await loadDashboard();
     });
-    ['cell-name', 'cell-address', 'cell-datatype', 'cell-rw', 'cell-scan'].forEach((cls) => {
+    ['cell-name', 'cell-address', 'cell-datatype', 'cell-rw'].forEach((cls) => {
       const el = tr.querySelector('.' + cls);
-      el.addEventListener('change', () => saveInlineEdit(tag.id, tr));
+      if (el) {
+        el.addEventListener('change', () => saveInlineEdit(tag.id, tr));
+      }
+    });
+    ['cell-name', 'cell-address'].forEach((cls) => {
+      const el = tr.querySelector('.' + cls);
+      if (el) el.addEventListener('input', () => autoSizeCellInput(el));
     });
   });
 
@@ -394,6 +639,45 @@ async function loadTags() {
   const anyOn = document.querySelectorAll('#tagTableBody .rt-toggle.on').length > 0;
   if (anyOn && !state.realtimeEnabled) startRealtime();
   else if (!anyOn && state.realtimeEnabled) stopRealtime();
+}
+
+async function openTbDeviceSelect(tag) {
+  const tbDevices = await api('/api/thingsboard-devices');
+  const mapped = await api(`/api/tags/${tag.id}/tb-devices`);
+  const mappedIds = new Set(mapped.map((m) => m.id));
+  const html = `
+    <h3>Thiết bị ThingsBoard cho tag: ${escapeHtml(tag.name)}</h3>
+    <div id="tb-list">
+      ${tbDevices.length === 0 ? '<p class="muted">Chưa có thiết bị ThingsBoard nào. <a href="#" id="addTbHere">Thêm mới</a></p>' : ''}
+      ${tbDevices.map((tb) => `
+        <div class="checkbox-inline">
+          <input type="checkbox" id="tb-${tb.id}" value="${tb.id}" ${mappedIds.has(tb.id) ? 'checked' : ''} />
+          <label for="tb-${tb.id}">${escapeHtml(tb.name)} (${escapeHtml(tb.host)}${tb.port !== 80 ? ':' + tb.port : ''})</label>
+        </div>
+      `).join('')}
+    </div>
+    <div id="err" class="error-text"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Đóng</button>
+      <button class="btn btn-primary" id="saveTb">Lưu</button>
+    </div>
+  `;
+  openModal(html);
+  $('#addTbHere')?.addEventListener('click', (e) => { e.preventDefault(); closeModal(); openTbDeviceForm(); });
+  $('#saveTb').onclick = async () => {
+    const selected = [...document.querySelectorAll('#tb-list input[type=checkbox]:checked')].map((cb) => Number(cb.value));
+    try {
+      const current = await api(`/api/tags/${tag.id}/tb-devices`);
+      const currentIds = new Set(current.map((m) => m.id));
+      for (const id of selected) {
+        if (!currentIds.has(id)) await api(`/api/tags/${tag.id}/tb-devices`, { method: 'POST', body: JSON.stringify({ tb_device_id: id }) });
+      }
+      for (const m of current) {
+        if (!selected.includes(m.id)) await api(`/api/tags/${tag.id}/tb-devices/${m.id}`, { method: 'DELETE' });
+      }
+      closeModal(); await loadTags();
+    } catch (e) { $('#err').textContent = e.message; }
+  };
 }
 
 // ---------- REALTIME ----------
@@ -406,8 +690,6 @@ function setLiveCell(tagId, result) {
 
   if (!result || result.quality === 'bad') {
     dot.className = 'live-dot bad';
-    text.className = 'live-text';
-    text.textContent = 'Lỗi';
     text.title = result?.error || 'Không đọc được';
     return;
   }
@@ -417,7 +699,7 @@ function setLiveCell(tagId, result) {
   if (typeof result.value === 'boolean') {
     text.textContent = result.value ? 'TRUE' : 'FALSE';
   } else if (result.scaledValue != null) {
-    text.textContent = `${formatNum(result.scaledValue)} (raw ${formatNum(result.value)})`;
+    text.textContent = formatNum(result.scaledValue);
   } else {
     text.textContent = formatNum(result.value);
   }
@@ -453,7 +735,7 @@ function startRealtime() {
   if (state.realtimeEnabled) return;
   state.realtimeEnabled = true;
   pollLiveValues();
-  state.realtimeTimer = setInterval(pollLiveValues, REALTIME_POLL_MS);
+  state.realtimeTimer = setInterval(pollLiveValues, realtimePollMs);
 }
 
 function stopRealtime() {
@@ -470,7 +752,6 @@ async function saveInlineEdit(id, tr) {
     address: tr.querySelector('.cell-address').value,
     data_type: Number(tr.querySelector('.cell-datatype').value),
     rw_access: Number(tr.querySelector('.cell-rw').value),
-    scan_rate_ms: Number(tr.querySelector('.cell-scan').value),
   };
   try {
     await api(`/api/tags/${id}`, { method: 'PUT', body: JSON.stringify(body) });
@@ -493,7 +774,6 @@ function renderPagination(total) {
 function updateBulkButtons() {
   const has = state.selected.size > 0;
   $('#bulkDeleteBtn').disabled = !has;
-  $('#bulkScanRateBtn').disabled = !has;
 }
 
 $('#selectAllTags').addEventListener('change', (e) => {
@@ -526,30 +806,18 @@ $('#filterOnBtn').addEventListener('click', () => {
   loadTags();
 });
 
+$('#filterTbBtn').addEventListener('click', () => {
+  state.tbFilter = !state.tbFilter;
+  state.page = 1;
+  loadTags();
+});
+
 $('#bulkDeleteBtn').addEventListener('click', async () => {
   if (!state.selected.size) return;
   if (!confirm(`Xoá ${state.selected.size} tag đã chọn?`)) return;
   await api('/api/tags/bulk-delete', { method: 'POST', body: JSON.stringify({ ids: [...state.selected] }) });
   state.selected.clear();
   await loadTags(); await loadTree(); await loadDashboard();
-});
-
-$('#bulkScanRateBtn').addEventListener('click', () => {
-  openModal(`
-    <h3>Sửa Scan Rate hàng loạt (${state.selected.size} tag)</h3>
-    <div class="field"><label>Scan Rate mới (ms)</label><input id="f-rate" type="number" value="1000" /></div>
-    <div class="modal-actions">
-      <button class="btn" onclick="closeModal()">Huỷ</button>
-      <button class="btn btn-primary" id="save">Áp dụng</button>
-    </div>
-  `);
-  $('#save').onclick = async () => {
-    await api('/api/tags/bulk-update', { method: 'POST', body: JSON.stringify({
-      ids: [...state.selected], patch: { scan_rate_ms: Number($('#f-rate').value) },
-    }) });
-    closeModal(); state.selected.clear();
-    await loadTags(); await loadDashboard();
-  };
 });
 
 // ---------- TAG FORM (add / edit with scaling) ----------
@@ -577,10 +845,7 @@ async function openTagForm(tag = null) {
           <option value="1" ${tag && tag.rw_access === 1 ? 'selected' : ''}>Read/Write</option>
         </select>
       </div>
-      <div class="field"><label>Scan Rate (ms)</label><input id="f-scan" type="number" value="${tag ? tag.scan_rate_ms : 1000}" /></div>
     </div>
-      <div class="field"><label>Số chữ số thập phân hiển thị (Realtime)</label><input id="f-decimals" type="number" min="0" max="6" value="${tag && Number.isInteger(tag.decimals) ? tag.decimals : 2}" /></div>
-    <div class="checkbox-inline"><input type="checkbox" id="f-realtime" ${tag && tag.realtime_enabled ? 'checked' : ''} /> <label for="f-realtime">Bật Realtime</label></div>
     <div class="checkbox-inline"><input type="checkbox" id="f-scaling-enabled" ${hasScaling ? 'checked' : ''} /> <label for="f-scaling-enabled">Bật Scaling (Linear)</label></div>
     <div id="scalingFields" style="display:${hasScaling ? 'block' : 'none'}">
       <div class="field-row">
@@ -628,9 +893,6 @@ async function openTagForm(tag = null) {
       address: $('#f-address').value,
       data_type: Number($('#f-datatype').value),
       rw_access: Number($('#f-rw').value),
-      scan_rate_ms: Number($('#f-scan').value),
-      decimals: Number($('#f-decimals').value),
-      realtime_enabled: $('#f-realtime').checked ? 1 : 0,
       scaling: scalingEnabled ? {
         rawLow: Number($('#f-rawlow').value), rawHigh: Number($('#f-rawhigh').value),
         scaledLow: Number($('#f-scaledlow').value), scaledHigh: Number($('#f-scaledhigh').value),
@@ -638,8 +900,11 @@ async function openTagForm(tag = null) {
       } : null,
     };
     try {
-      if (isEdit) await api(`/api/tags/${tag.id}`, { method: 'PUT', body: JSON.stringify(body) });
-      else await api('/api/tags', { method: 'POST', body: JSON.stringify({ ...body, device_id: state.currentDeviceId }) });
+      if (isEdit) {
+        await api(`/api/tags/${tag.id}`, { method: 'PUT', body: JSON.stringify(body) });
+      } else {
+        await api('/api/tags', { method: 'POST', body: JSON.stringify({ ...body, device_id: state.currentDeviceId }) });
+      }
       closeModal(); await loadTags(); await loadTree(); await loadDashboard();
     } catch (e) { $('#err').textContent = e.message; }
   };
@@ -727,4 +992,5 @@ window.addEventListener('beforeunload', () => {
 (async function init() {
   await loadDashboard();
   await loadTree();
+  await loadTbDevices();
 })();
