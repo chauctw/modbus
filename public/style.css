@@ -135,21 +135,26 @@ th, td {
 th:nth-child(3), td:nth-child(3) { text-align: left; }
 th:last-child, td:last-child { text-align: right; }
 
-#tagTable th.col-scaling, #tagTable th:nth-child(6),
-#tagTable td.col-scaling, #tagTable td:nth-child(6) { display: none; }
+#tagTable th.col-scaling,
+#tagTable td.col-scaling { display: none; }
 th { background-color: var(--panel-2); cursor: pointer; user-select: none; font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
 tr:hover td { background: #1a2236; }
 td input[type=number] { width: 100%; background: transparent; border: 1px solid transparent; color: var(--text); padding: 2px 4px; border-radius: 4px; }
 /* .cell-name / .cell-address được auto-size theo nội dung bằng JS (xem autoSizeCellInput
    trong app.js) để table-layout:auto có thể co giãn cột vừa khít nội dung thay vì luôn 100%. */
 td input.cell-name, td input.cell-address {
-  min-width: 4ch;
+  min-width: 40px;
   background: transparent;
   border: 1px solid transparent;
   color: var(--text);
   padding: 2px 4px;
   border-radius: 4px;
 }
+
+/* max-width chỉ áp cho input để không bị co quá nhỏ; input.cell-name/address
+   tự nới rộng theo nội dung (autoSizeCellInput trong app.js), còn các ô text
+   khác (Access Token, Thiết bị TB, Host...) hiển thị đầy đủ, không cắt —
+   nếu bảng rộng hơn khung nhìn thì cuộn ngang qua .table-wrap. */
 td input[type=text]:focus, td input[type=number]:focus,
 td input.cell-name:focus, td input.cell-address:focus { border-color: var(--accent); background: var(--panel-2); }
 .row-actions { text-align: right; white-space: nowrap; width: 100%; }

@@ -415,11 +415,11 @@ function renderTbDeviceList(tbDevices) {
     tr.dataset.id = tb.id;
     tr.innerHTML = `
       <td class="muted">${idx + 1}</td>
-      <td>${escapeHtml(tb.name)}</td>
-      <td>${escapeHtml(tb.host)}</td>
+      <td title="${escapeHtml(tb.name)}">${escapeHtml(tb.name)}</td>
+      <td title="${escapeHtml(tb.host)}">${escapeHtml(tb.host)}</td>
       <td class="muted">${tb.port}</td>
-      <td><span style="font-family:monospace">${escapeHtml(tb.access_token)}</span></td>
-      <td class="muted">${escapeHtml(tb.device_name || '-')}</td>
+      <td title="${escapeHtml(tb.access_token)}"><span style="font-family:monospace">${escapeHtml(tb.access_token)}</span></td>
+      <td class="muted" title="${escapeHtml(tb.device_name || '-')}">${escapeHtml(tb.device_name || '-')}</td>
       <td class="muted">${tb.protocol === 'https' ? 'HTTPS' : 'HTTP'}</td>
       <td class="muted">${tb.telemetry_interval_ms}</td>
       <td class="muted">${tb.attributes_interval_ms}</td>
@@ -505,12 +505,27 @@ async function getDataTypes() {
   return dataTypesCache;
 }
 
-// Tự co giãn width của input theo đúng nội dung đang có (tính theo ký tự "ch"),
-// để table-layout:auto co cột vừa khít nội dung thay vì luôn chiếm 100% cột.
+// Tự co giãn width của input theo đúng bề rộng PIXEL thực tế của nội dung
+// (đo bằng canvas theo đúng font đang áp dụng), thay vì áng chừng theo số
+// ký tự bằng đơn vị "ch" — vì font của app là font không đều (proportional:
+// Segoe UI/Roboto/Helvetica...), nhiều ký tự (chữ hoa, chữ có dấu tiếng
+// Việt...) rộng hơn ký tự "0" nên cách tính theo "ch" hay bị hụt, làm chữ
+// bị che dù cột bảng còn đủ chỗ.
+let _measureCanvas = null;
+function measureTextWidth(text, font) {
+  if (!_measureCanvas) _measureCanvas = document.createElement('canvas');
+  const ctx = _measureCanvas.getContext('2d');
+  ctx.font = font;
+  return ctx.measureText(text || '').width;
+}
 function autoSizeCellInput(el) {
   if (!el) return;
-  const len = (el.value || '').length;
-  el.style.width = Math.max(4, len + 2) + 'ch';
+  const style = getComputedStyle(el);
+  const font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  const textWidth = measureTextWidth(el.value, font);
+  const paddingBorder = 4 + 4 + 2 + 2; // padding trái/phải (2px*2) + border (1px*2) + đệm an toàn
+  el.style.width = Math.max(40, Math.ceil(textWidth) + paddingBorder + 8) + 'px';
+  el.title = el.value || '';
 }
 
 async function loadTags() {
@@ -542,8 +557,8 @@ rows.forEach((tag, idx) => {
      tr.innerHTML = `
        <td><input type="checkbox" class="row-check" ${state.selected.has(tag.id) ? 'checked' : ''} /></td>
        <td class="muted">${stt}</td>
-       <td><input type="text" class="cell-name" value="${escapeHtml(tag.name)}" /></td>
-       <td><input type="text" class="cell-address" value="${escapeHtml(tag.address || '')}" /></td>
+       <td><input type="text" class="cell-name" value="${escapeHtml(tag.name)}" title="${escapeHtml(tag.name)}" /></td>
+       <td><input type="text" class="cell-address" value="${escapeHtml(tag.address || '')}" title="${escapeHtml(tag.address || '')}" /></td>
        <td>
          <select class="cell-datatype">
            ${Object.entries(dataTypes).map(([code, n]) => `<option value="${code}" ${Number(code) === tag.data_type ? 'selected' : ''}>${n}</option>`).join('')}
@@ -560,7 +575,7 @@ rows.forEach((tag, idx) => {
        <td class="cell-live"><span class="live-value"><span class="live-dot"></span><span class="live-text muted">—</span></span></td>
        <td><button class="rt-toggle ${tbTelemetryClass}" data-tb-telemetry-id="${tag.id}">${tag.tb_telemetry_enabled ? 'ON' : 'OFF'}</button></td>
        <td><button class="rt-toggle ${tbAttributesClass}" data-tb-attributes-id="${tag.id}">${tag.tb_attributes_enabled ? 'ON' : 'OFF'}</button></td>
-       <td class="cell-tb-devices" data-tag-id="${tag.id}" style="cursor:pointer;color:var(--accent)">${escapeHtml(tbNames)}</td>
+       <td class="cell-tb-devices" data-tag-id="${tag.id}" style="cursor:pointer;color:var(--accent)" title="${escapeHtml(tbNames)}">${escapeHtml(tbNames)}</td>
        <td class="row-actions">
          <button class="icon-btn edit-btn" title="Sửa chi tiết (scaling)">⚙</button>
          <button class="icon-btn del-btn" title="Xoá">🗑</button>
