@@ -108,6 +108,13 @@ ensureColumn('tags', 'tb_attributes_interval_ms', 'INTEGER DEFAULT 5000');
 ensureColumn('thingsboard_devices', 'telemetry_interval_ms', 'INTEGER DEFAULT 5000');
 ensureColumn('thingsboard_devices', 'attributes_interval_ms', 'INTEGER DEFAULT 5000');
 ensureColumn('thingsboard_devices', 'protocol', "TEXT DEFAULT 'http'");
+// Cho phép gán 1 thiết bị ThingsBoard "mặc định" ngay ở cấp Device: mọi tag của
+// device này (đã bật Telemetry/Attributes) sẽ tự động gửi lên thiết bị TB này mà
+// không cần gán riêng từng tag qua bảng tag_tb_devices nữa (xem processThingsBoardUploads
+// trong server.js). Không đặt FOREIGN KEY cứng ở đây (SQLite ALTER TABLE hạn chế thêm
+// FK vào bảng đã có sẵn) - việc dọn dẹp khi xoá thiết bị TB được xử lý thủ công ở
+// server.js (DELETE /api/thingsboard-devices/:id).
+ensureColumn('devices', 'default_tb_device_id', 'INTEGER');
 
 // Migration: đồng bộ cột protocol từ raw_json cho các DB cũ (trước đây protocol chỉ
 // nằm trong raw_json, không phải cột thật, khiến API GET không trả về được và form

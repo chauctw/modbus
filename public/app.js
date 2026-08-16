@@ -277,7 +277,8 @@ async function selectDevice(channelId, deviceId) {
   $('#tagPagination').style.display = 'block';
   $('#tbDeviceTableWrap').style.display = 'none';
   $('#deviceTitle').textContent = dev.name;
-  $('#deviceMeta').textContent = `IP: ${dev.ip || '-'} | Slave ID: ${dev.slave_id ?? '-'} | Scan: ${dev.scan_rate_ms}ms | Timeout: ${dev.conn_timeout_s}s / ${dev.req_timeout_ms}ms | Byte Swap: ${dev.byte_swap ? 'Bật' : 'Tắt'} | Word Swap: ${dev.word_swap ? 'Bật' : 'Tắt'}`;
+  const tbInfo = dev.default_tb_device ? `📡 ${escapeHtml(dev.default_tb_device.name)}` : 'Chưa gán';
+  $('#deviceMeta').innerHTML = `IP: ${dev.ip || '-'} | Slave ID: ${dev.slave_id ?? '-'} | Scan: ${dev.scan_rate_ms}ms | Timeout: ${dev.conn_timeout_s}s / ${dev.req_timeout_ms}ms | Byte Swap: ${dev.byte_swap ? 'Bật' : 'Tắt'} | Word Swap: ${dev.word_swap ? 'Bật' : 'Tắt'} | Thiết bị TB: ${tbInfo}`;
 
   $('#editDeviceBtn').style.display = '';
   $('#duplicateDeviceBtn').style.display = '';
@@ -337,8 +338,13 @@ async function selectTbDevice(tb) {
   renderTbDeviceList(state.tbDevices);
 }
 
-function openDeviceForm(channelId, dev = null) {
+async function openDeviceForm(channelId, dev = null) {
   const isEdit = !!dev;
+  await loadTbDevices();
+  const tbOptions = `
+    <option value="">— Không gán (gán riêng theo từng tag) —</option>
+    ${state.tbDevices.map((tb) => `<option value="${tb.id}" ${dev && dev.default_tb_device_id === tb.id ? 'selected' : ''}>${escapeHtml(tb.name)} (${escapeHtml(tb.host)}${tb.port !== 80 ? ':' + tb.port : ''})</option>`).join('')}
+  `;
   openModal(`
     <h3>${isEdit ? 'Sửa' : 'Thêm'} Device</h3>
     <div class="field"><label>Tên</label><input id="f-name" value="${dev ? escapeHtml(dev.name) : ''}" /></div>
@@ -354,6 +360,11 @@ function openDeviceForm(channelId, dev = null) {
     <div class="checkbox-inline"><input type="checkbox" id="f-byteswap" ${dev && dev.byte_swap ? 'checked' : ''} /> <label for="f-byteswap">Đảo Byte (Byte Swap)</label></div>
     <div class="checkbox-inline"><input type="checkbox" id="f-wordswap" ${dev && dev.word_swap ? 'checked' : ''} /> <label for="f-wordswap">Đảo Word (Word Swap)</label></div>
     <p class="muted">Bật 2 tuỳ chọn này nếu giá trị Realtime (đặc biệt kiểu Float/DWord/Long, 32-bit trở lên) đọc về sai — do PLC dùng thứ tự byte/word khác mặc định. Thử bật/tắt để tìm đúng tổ hợp khớp với thiết bị thật.</p>
+    <div class="field">
+      <label>Thiết bị ThingsBoard nhận dữ liệu</label>
+      <select id="f-tb">${tbOptions}</select>
+    </div>
+    <p class="muted">Khi chọn 1 thiết bị ở đây, mọi tag của device này (đã bật Telemetry/Attributes) sẽ tự động gửi tới thiết bị này — không cần vào từng tag để gán riêng nữa. Vẫn có thể gán thêm thiết bị khác cho 1 tag cụ thể qua cột "Thiết bị TB" nếu cần.</p>
     <div id="err" class="error-text"></div>
     <div class="modal-actions">
       <button class="btn" onclick="closeModal()">Huỷ</button>
@@ -370,6 +381,7 @@ function openDeviceForm(channelId, dev = null) {
       req_timeout_ms: Number($('#f-req').value),
       byte_swap: $('#f-byteswap').checked,
       word_swap: $('#f-wordswap').checked,
+      default_tb_device_id: $('#f-tb').value ? Number($('#f-tb').value) : null,
     };
     try {
       if (isEdit) await api(`/api/devices/${dev.id}`, { method: 'PUT', body: JSON.stringify(body) });
@@ -553,7 +565,7 @@ rows.forEach((tag, idx) => {
      const rtClass = tag.realtime_enabled ? 'on' : 'off';
      const tbTelemetryClass = tag.tb_telemetry_enabled ? 'on' : 'off';
      const tbAttributesClass = tag.tb_attributes_enabled ? 'on' : 'off';
-     const tbNames = (tag.tb_devices || []).map((tb) => tb.name).join(', ') || '—';
+     const tbNames = (tag.tb_devices || []).map((tb) => tb.inherited ? `${tb.name} (theo Device)` : tb.name).join(', ') || '—';
      tr.innerHTML = `
        <td><input type="checkbox" class="row-check" ${state.selected.has(tag.id) ? 'checked' : ''} /></td>
        <td class="muted">${stt}</td>
@@ -660,8 +672,10 @@ async function openTbDeviceSelect(tag) {
   const tbDevices = await api('/api/thingsboard-devices');
   const mapped = await api(`/api/tags/${tag.id}/tb-devices`);
   const mappedIds = new Set(mapped.map((m) => m.id));
+  const inherited = (tag.tb_devices || []).filter((tb) => tb.inherited);
   const html = `
     <h3>Thiết bị ThingsBoard cho tag: ${escapeHtml(tag.name)}</h3>
+    ${inherited.length ? `<p class="muted">Tag này đã tự động gửi tới <b>${inherited.map((tb) => escapeHtml(tb.name)).join(', ')}</b> theo cấu hình mặc định của Device (không cần chọn lại bên dưới). Chỉ chọn thêm nếu muốn gửi tới thiết bị KHÁC nữa.</p>` : ''}
     <div id="tb-list">
       ${tbDevices.length === 0 ? '<p class="muted">Chưa có thiết bị ThingsBoard nào. <a href="#" id="addTbHere">Thêm mới</a></p>' : ''}
       ${tbDevices.map((tb) => `
