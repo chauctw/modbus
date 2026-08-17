@@ -168,30 +168,4 @@ async function fetchViwaterLive() {
     } catch (e) { return state.cachedViwaterData; }
 }
 
-// --- ĐOẠN CODE TEST THỰC THI TRỰC TIẾP ---
-(async () => {
-    console.log("--- BẮT ĐẦU TEST FETCH DỮ LIỆU ---");
-
-    console.log("\n1. Nước Sạch:");
-    const cleanWater = await fetchCleanWaterLive();
-    cleanWater.forEach(item => {
-        Object.entries(item.rawData).forEach(([k, v]) => console.log(`${item.tag_name}_${k}: ${v}`));
-    });
-    console.log(`Thống kê: ${cleanWater.length} trạm nước sạch`);
-
-    console.log("\n2. Nước Thô:");
-    const rawWater = await fetchRawWaterLive();
-    rawWater.forEach(item => {
-        Object.entries(item.rawData).forEach(([k, v]) => console.log(`${item.tag_name}_${k}: ${v}`));
-    });
-    console.log(`Thống kê: ${rawWater.length} trạm nước thô`);
-
-    console.log("\n3. Viwater:");
-    const viwater = await fetchViwaterLive();
-    viwater.forEach(item => {
-        Object.entries(item.rawData).forEach(([k, v]) => console.log(`${item.tag_name}_${k}: ${v}`));
-    });
-    console.log(`Thống kê: ${viwater.length} trạm viwater`);
-
-    console.log("\n--- HOÀN TẤT TEST ---");
-})();
+module.exports = { fetchCleanWaterLive, fetchRawWaterLive, fetchViwaterLive };

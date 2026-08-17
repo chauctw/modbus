@@ -84,10 +84,19 @@ CREATE TABLE IF NOT EXISTS tag_tb_devices (
   PRIMARY KEY (tag_id, tb_device_id)
 );
 
+CREATE TABLE IF NOT EXISTS api_tb_mappings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  api_key TEXT NOT NULL,
+  tb_device_id INTEGER NOT NULL REFERENCES thingsboard_devices(id) ON DELETE CASCADE,
+  enabled INTEGER DEFAULT 1,
+  UNIQUE(api_key, tb_device_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_devices_channel ON devices(channel_id);
 CREATE INDEX IF NOT EXISTS idx_tags_device ON tags(device_id);
 CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name);
 CREATE INDEX IF NOT EXISTS idx_tags_address ON tags(address);
+CREATE INDEX IF NOT EXISTS idx_api_tb_mappings_key ON api_tb_mappings(api_key);
 `);
 
 // ---- Migration an toàn cho DB đã tồn tại từ bản trước (thêm cột nếu chưa có) ----
@@ -115,6 +124,23 @@ ensureColumn('thingsboard_devices', 'protocol', "TEXT DEFAULT 'http'");
 // FK vào bảng đã có sẵn) - việc dọn dẹp khi xoá thiết bị TB được xử lý thủ công ở
 // server.js (DELETE /api/thingsboard-devices/:id).
 ensureColumn('devices', 'default_tb_device_id', 'INTEGER');
+
+// Migration for api_tb_mappings intervals
+(function migrateApiTbMappings() {
+  const cols = db.prepare("PRAGMA table_info(api_tb_mappings)").all().map(c => c.name);
+  if (!cols.includes('telemetry_enabled')) {
+    db.exec("ALTER TABLE api_tb_mappings ADD COLUMN telemetry_enabled INTEGER DEFAULT 1");
+  }
+  if (!cols.includes('attributes_enabled')) {
+    db.exec("ALTER TABLE api_tb_mappings ADD COLUMN attributes_enabled INTEGER DEFAULT 1");
+  }
+  if (!cols.includes('telemetry_interval_ms')) {
+    db.exec("ALTER TABLE api_tb_mappings ADD COLUMN telemetry_interval_ms INTEGER DEFAULT 5000");
+  }
+  if (!cols.includes('attributes_interval_ms')) {
+    db.exec("ALTER TABLE api_tb_mappings ADD COLUMN attributes_interval_ms INTEGER DEFAULT 5000");
+  }
+})();
 
 // Migration: đồng bộ cột protocol từ raw_json cho các DB cũ (trước đây protocol chỉ
 // nằm trong raw_json, không phải cột thật, khiến API GET không trả về được và form

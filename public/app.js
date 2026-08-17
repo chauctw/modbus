@@ -137,49 +137,34 @@ function renderTree() {
   const tbSection = document.createElement('div');
   tbSection.className = 'tree-channel';
   const tbDevices = state.tbDevices.filter((tb) => !filter || tb.name.toLowerCase().includes(filter));
-  const tbIsExpanded = expandedChannels.has('__tb__') || state.currentChannelId === '__tb__';
   tbSection.innerHTML = `
-    <div class="tree-channel-row ${tbIsExpanded ? 'expanded' : ''}" data-channel="__tb__">
-      <span class="tree-channel-toggle">▶</span>
+    <div class="tree-channel-row" data-channel="__tb__">
       <span class="tree-channel-name">📡 ThingsBoard</span>
       <span class="badge">${tbDevices.length} device</span>
       <button class="tree-channel-actions" title="Thêm thiết bị TB">+</button>
     </div>
-    <div class="tree-devices ${tbIsExpanded ? '' : 'collapsed'}"></div>
   `;
-  const tbDevicesEl = tbSection.querySelector('.tree-devices');
-  tbDevices.forEach((tb) => {
-    const row = document.createElement('div');
-    row.className = 'tree-device-row' + (state.currentDeviceId === `tb-${tb.id}` ? ' active' : '');
-    row.dataset.device = `tb-${tb.id}`;
-    row.dataset.channel = '__tb__';
-    row.dataset.type = 'thingsboard';
-    row.innerHTML = `<span>🔌 ${escapeHtml(tb.name)}</span><span class="badge">${tb.enabled ? 'Bật' : 'Tắt'}</span>`;
-    row.addEventListener('click', (e) => {
-      e.stopPropagation();
-      selectTbDevice(tb);
-    });
-    tbDevicesEl.appendChild(row);
-  });
-
-  tbSection.querySelector('.tree-channel-toggle').addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (expandedChannels.has('__tb__')) {
-      expandedChannels.delete('__tb__');
-    } else {
-      expandedChannels.add('__tb__');
-    }
-    renderTree();
-  });
 
   tbSection.querySelector('.tree-channel-name').addEventListener('click', (e) => {
     e.stopPropagation();
-    if (expandedChannels.has('__tb__')) {
-      expandedChannels.delete('__tb__');
+    if (state.currentChannelId === '__tb__') {
+      state.currentChannelId = null;
+      state.currentDeviceId = null;
+      showEmptyState();
     } else {
-      expandedChannels.add('__tb__');
+      state.currentChannelId = '__tb__';
+      state.currentDeviceId = null;
+      expandedChannels.clear();
+      $('#emptyState').style.display = 'none';
+      $('#deviceHeader').style.display = 'none';
+      $('#tagToolbar').style.display = 'none';
+      $('#tagTableWrap').style.display = 'none';
+      $('#tagPagination').style.display = 'none';
+      $('#tbDeviceTableWrap').style.display = 'block';
+      $('#liveFetchTableWrap').style.display = 'none';
+      renderTbDeviceList(state.tbDevices);
+      renderTree();
     }
-    renderTree();
   });
 
   tbSection.querySelector('.tree-channel-actions').addEventListener('click', (e) => {
@@ -188,6 +173,46 @@ function renderTree() {
   });
 
   treeEl.appendChild(tbSection);
+
+  const apiSection = document.createElement('div');
+  apiSection.className = 'tree-channel';
+  const activeApiSource = currentLiveSource ? liveFetchSources.find(s => s.key === currentLiveSource) : null;
+  apiSection.innerHTML = `
+    <div class="tree-channel-row" data-channel="__api__">
+      <span class="tree-channel-name">📡 Channel API Fetch</span>
+      <span class="badge">${activeApiSource ? activeApiSource.label : 'Chưa chọn'}</span>
+      <button class="tree-channel-actions" title="Tùy chọn">⋯</button>
+    </div>
+    <div class="tree-devices"></div>
+  `;
+  const apiDevicesEl = apiSection.querySelector('.tree-devices');
+  liveFetchSources.forEach((src) => {
+    const row = document.createElement('div');
+    row.className = 'tree-device-row' + (currentLiveSource === src.key ? ' active' : '');
+    row.dataset.device = src.key;
+    row.dataset.channel = '__api__';
+    row.dataset.type = 'api';
+    row.innerHTML = `<span>${src.icon} ${escapeHtml(src.label)}</span>`;
+    row.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectLiveSource(src.key);
+    });
+    apiDevicesEl.appendChild(row);
+  });
+
+  apiSection.querySelector('.tree-channel-name').addEventListener('click', (e) => {
+    e.stopPropagation();
+    selectLiveSource(currentLiveSource ? null : liveFetchSources[0].key);
+  });
+
+  apiSection.querySelector('.tree-channel-actions').addEventListener('click', (e) => {
+    e.stopPropagation();
+    currentLiveSource = null;
+    renderLiveFetchTable();
+    renderTree();
+  });
+
+  treeEl.appendChild(apiSection);
 }
 
 function openChannelMenu(ch) {
@@ -266,6 +291,7 @@ async function selectDevice(channelId, deviceId) {
   state.selected.clear();
   expandedChannels.clear();
   expandedChannels.add(String(channelId));
+  currentLiveSource = null;
   renderTree();
   await loadTbDevices();
   const dev = await api(`/api/devices/${deviceId}`);
@@ -276,6 +302,7 @@ async function selectDevice(channelId, deviceId) {
   $('#tagTableWrap').style.display = 'block';
   $('#tagPagination').style.display = 'block';
   $('#tbDeviceTableWrap').style.display = 'none';
+  $('#liveFetchTableWrap').style.display = 'none';
   $('#deviceTitle').textContent = dev.name;
   const tbInfo = dev.default_tb_device ? `📡 ${escapeHtml(dev.default_tb_device.name)}` : 'Chưa gán';
   $('#deviceMeta').innerHTML = `IP: ${dev.ip || '-'} | Slave ID: ${dev.slave_id ?? '-'} | Scan: ${dev.scan_rate_ms}ms | Timeout: ${dev.conn_timeout_s}s / ${dev.req_timeout_ms}ms | Byte Swap: ${dev.byte_swap ? 'Bật' : 'Tắt'} | Word Swap: ${dev.word_swap ? 'Bật' : 'Tắt'} | Thiết bị TB: ${tbInfo}`;
@@ -297,12 +324,14 @@ async function selectDevice(channelId, deviceId) {
 
 function showEmptyState() {
   stopRealtime();
+  currentLiveSource = null;
   $('#emptyState').style.display = 'block';
   $('#deviceHeader').style.display = 'none';
   $('#tagToolbar').style.display = 'none';
   $('#tagTableWrap').style.display = 'none';
   $('#tagPagination').style.display = 'none';
   $('#tbDeviceTableWrap').style.display = 'none';
+  $('#liveFetchTableWrap').style.display = 'none';
   expandedChannels.clear();
   state.currentChannelId = null;
   state.currentDeviceId = null;
@@ -311,6 +340,7 @@ function showEmptyState() {
 
 async function selectTbDevice(tb) {
   stopRealtime();
+  currentLiveSource = null;
   state.currentChannelId = '__tb__';
   state.currentDeviceId = `tb-${tb.id}`;
   state.page = 1;
@@ -334,6 +364,7 @@ async function selectTbDevice(tb) {
 
   $('#tagTableWrap').style.display = 'none';
   $('#tagPagination').style.display = 'none';
+  $('#liveFetchTableWrap').style.display = 'none';
   $('#tbDeviceTableWrap').style.display = 'block';
   renderTbDeviceList(state.tbDevices);
 }
@@ -1017,9 +1048,206 @@ window.addEventListener('beforeunload', () => {
   }
 });
 
+let liveFetchTimer = null;
+let liveFetchData = { cleanWater: [], rawWater: [], viwater: [] };
+let currentLiveSource = null;
+let apiTbMappings = {};
+
+const liveFetchSources = [
+  { key: 'cleanWater', label: 'Nước Sạch', icon: '💧' },
+  { key: 'rawWater', label: 'Nước Thô', icon: '🌊' },
+  { key: 'viwater', label: 'Viwater', icon: '🚰' },
+];
+
+async function loadApiTbMappings() {
+  try {
+    const mappings = await api('/api/api-tb-mappings');
+    apiTbMappings = {};
+    mappings.forEach(m => {
+      if (!apiTbMappings[m.api_key]) apiTbMappings[m.api_key] = [];
+      apiTbMappings[m.api_key].push({
+        tb_device_id: m.tb_device_id,
+        telemetry_enabled: !!m.telemetry_enabled,
+        attributes_enabled: !!m.attributes_enabled,
+        telemetry_interval_ms: m.telemetry_interval_ms || 5000,
+        attributes_interval_ms: m.attributes_interval_ms || 5000,
+      });
+    });
+  } catch (e) {
+    console.error('Failed to load API TB mappings:', e);
+  }
+}
+
+async function saveApiTbMappings(apiKey, mappings) {
+  try {
+    await api('/api/api-tb-mappings', {
+      method: 'POST',
+      body: JSON.stringify({ api_key: apiKey, mappings }),
+    });
+    apiTbMappings[apiKey] = mappings;
+  } catch (e) {
+    console.error('Failed to save API TB mappings:', e);
+  }
+}
+
+async function loadLiveFetch() {
+  try {
+    const data = await api('/api/live-fetch');
+    liveFetchData = data;
+    renderLiveFetchTable();
+    $('#liveFetchStatus').textContent = `Cập nhật lúc ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    $('#liveFetchStatus').textContent = 'Lỗi: ' + e.message;
+  }
+}
+
+function renderLiveFetchTable() {
+  const tbody = $('#liveFetchTableBody');
+  tbody.innerHTML = '';
+  if (!currentLiveSource) {
+    $('#liveFetchTableWrap').style.display = 'none';
+    return;
+  }
+  const sourceLabel = liveFetchSources.find(s => s.key === currentLiveSource)?.label || currentLiveSource;
+  $('#liveFetchTitle').textContent = `Channel API Fetch - ${sourceLabel}`;
+  const items = liveFetchData[currentLiveSource] || [];
+  items.forEach((item, idx) => {
+    const key = item.tag_name;
+    const metrics = item.rawData || {};
+    Object.entries(metrics).forEach(([metric, value]) => {
+      const tr = document.createElement('tr');
+      const fullKey = `${key}_${metric}`;
+      const mappings = apiTbMappings[fullKey] || [];
+      const tbNames = mappings.map(m => {
+        const tb = state.tbDevices.find(t => t.id === m.tb_device_id);
+        return tb ? tb.name : 'Unknown';
+      }).join(', ') || '—';
+      tr.innerHTML = `
+        <td class="muted">${idx + 1}</td>
+        <td title="${escapeHtml(fullKey)}">${escapeHtml(fullKey)}</td>
+        <td class="muted">${escapeHtml(String(value))}</td>
+        <td><button class="rt-toggle ${mappings.some(m => m.telemetry_enabled) ? 'on' : 'off'}" data-lf-telemetry="${escapeHtml(fullKey)}" ${!mappings.length ? 'disabled' : ''}>${mappings.some(m => m.telemetry_enabled) ? 'ON' : 'OFF'}</button></td>
+        <td><button class="rt-toggle ${mappings.some(m => m.attributes_enabled) ? 'on' : 'off'}" data-lf-attributes="${escapeHtml(fullKey)}" ${!mappings.length ? 'disabled' : ''}>${mappings.some(m => m.attributes_enabled) ? 'ON' : 'OFF'}</button></td>
+        <td class="cell-tb-devices" data-lf-tb="${escapeHtml(fullKey)}" style="cursor:pointer;color:var(--accent)" title="${escapeHtml(tbNames)}">${escapeHtml(tbNames)}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  });
+  $('#liveFetchTableWrap').style.display = 'block';
+}
+
+async function openApiTbDeviceSelect(fullKey) {
+  const tbDevices = await api('/api/thingsboard-devices');
+  const mappings = apiTbMappings[fullKey] || [];
+  const html = `
+    <h3>Thiết bị ThingsBoard cho: ${escapeHtml(fullKey)}</h3>
+    <div id="tb-list">
+      ${tbDevices.length === 0 ? '<p class="muted">Chưa có thiết bị ThingsBoard nào.</p>' : ''}
+      ${tbDevices.map(tb => {
+        const mapped = mappings.find(m => m.tb_device_id === tb.id);
+        const isChecked = mapped ? 'checked' : '';
+        return `
+          <div class="checkbox-inline">
+            <input type="checkbox" id="tb-${tb.id}" value="${tb.id}" ${isChecked} />
+            <label for="tb-${tb.id}">${escapeHtml(tb.name)} (${escapeHtml(tb.host)}${tb.port !== 80 ? ':' + tb.port : ''})</label>
+          </div>
+        `;
+      }).join('')}
+    </div>
+    <div class="field">
+      <label>Telemetry Interval (ms)</label>
+      <input type="number" id="f-telemetry-interval" value="${mappings[0]?.telemetry_interval_ms || 5000}" />
+    </div>
+    <div class="field">
+      <label>Attributes Interval (ms)</label>
+      <input type="number" id="f-attributes-interval" value="${mappings[0]?.attributes_interval_ms || 5000}" />
+    </div>
+    <div id="err" class="error-text"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">Đóng</button>
+      <button class="btn btn-primary" id="saveTb">Lưu</button>
+    </div>
+  `;
+  openModal(html);
+  $('#saveTb').onclick = async () => {
+    const selected = [...document.querySelectorAll('#tb-list input[type=checkbox]:checked')].map(cb => Number(cb.value));
+    const telemetryInterval = Number($('#f-telemetry-interval').value) || 5000;
+    const attributesInterval = Number($('#f-attributes-interval').value) || 5000;
+    try {
+      const newMappings = selected.map(tb_device_id => ({
+        tb_device_id,
+        telemetry_enabled: 1,
+        attributes_enabled: 1,
+        telemetry_interval_ms: telemetryInterval,
+        attributes_interval_ms: attributesInterval,
+      }));
+      await saveApiTbMappings(fullKey, newMappings);
+      closeModal();
+      renderLiveFetchTable();
+      await loadApiTbMappings();
+    } catch (e) { $('#err').textContent = e.message; }
+  };
+}
+
+async function selectLiveSource(key) {
+  currentLiveSource = key;
+  state.currentDeviceId = null;
+  state.currentChannelId = '__api__';
+  expandedChannels.clear();
+  expandedChannels.add('__api__');
+  $('#emptyState').style.display = 'none';
+  $('#deviceHeader').style.display = 'none';
+  $('#tagToolbar').style.display = 'none';
+  $('#tagTableWrap').style.display = 'none';
+  $('#tagPagination').style.display = 'none';
+  $('#tbDeviceTableWrap').style.display = 'none';
+  await loadTbDevices();
+  renderLiveFetchTable();
+  renderTree();
+}
+
+function startLiveFetchPolling() {
+  if (liveFetchTimer) return;
+  loadLiveFetch();
+  liveFetchTimer = setInterval(loadLiveFetch, 10000);
+}
+
+function stopLiveFetchPolling() {
+  if (liveFetchTimer) clearInterval(liveFetchTimer);
+  liveFetchTimer = null;
+}
+
+$('#liveFetchTableBody').addEventListener('click', (e) => {
+  const btn = e.target.closest('.rt-toggle');
+  if (btn) {
+    const fullKey = btn.dataset.lfTelemetry || btn.dataset.lfAttributes;
+    if (!fullKey) return;
+    const isTelemetry = !!btn.dataset.lfTelemetry;
+    const mappings = apiTbMappings[fullKey] || [];
+    if (!mappings.length) return;
+    const newState = btn.classList.contains('on') ? 0 : 1;
+    const newMappings = mappings.map(m => ({
+      ...m,
+      [isTelemetry ? 'telemetry_enabled' : 'attributes_enabled']: newState,
+    }));
+    saveApiTbMappings(fullKey, newMappings).then(() => {
+      renderLiveFetchTable();
+      loadApiTbMappings();
+    });
+    return;
+  }
+  const tbCell = e.target.closest('.cell-tb-devices');
+  if (tbCell) {
+    const fullKey = tbCell.dataset.lfTb;
+    if (fullKey) openApiTbDeviceSelect(fullKey);
+  }
+});
+
 // ---------- INIT ----------
 (async function init() {
   await loadDashboard();
   await loadTree();
   await loadTbDevices();
+  await loadApiTbMappings();
+  startLiveFetchPolling();
 })();

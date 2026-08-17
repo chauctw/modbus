@@ -4,7 +4,7 @@ const path = require('path');
 const cors = require('cors');
 const axios = require('axios');
 const db = require('./db');
-const { importProject, mergeProject, exportProject } = require('./kepware-io');
+const { fetchCleanWaterLive, fetchRawWaterLive, fetchViwaterLive } = require('./live_fetchers');
 const { DATA_TYPES } = require('./datatypes');
 const { readTagsForDevice, closeConnection, closeAll } = require('./modbus-client');
 
@@ -630,6 +630,67 @@ app.get('/api/data-types', (req, res) => res.json(DATA_TYPES));
 
 app.get('/api/health', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
 
+app.get('/api/live-fetch', async (req, res) => {
+  try {
+    const [cleanWater, rawWater, viwater] = await Promise.all([
+      fetchCleanWaterLive(),
+      fetchRawWaterLive(),
+      fetchViwaterLive(),
+    ]);
+    res.json({ cleanWater, rawWater, viwater });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/api-tb-mappings', (req, res) => {
+  const rows = db.prepare('SELECT api_key, tb_device_id, telemetry_enabled, attributes_enabled, telemetry_interval_ms, attributes_interval_ms FROM api_tb_mappings').all();
+  res.json(rows);
+});
+
+app.post('/api/api-tb-mappings', (req, res) => {
+  const { api_key, mappings, tb_device_id, telemetry_enabled = 1, attributes_enabled = 1, telemetry_interval_ms = 5000, attributes_interval_ms = 5000 } = req.body;
+  if (!api_key) return res.status(400).json({ error: 'Thiếu api_key' });
+  if (mappings && Array.isArray(mappings)) {
+    const tx = db.transaction(() => {
+      db.prepare('DELETE FROM api_tb_mappings WHERE api_key=?').run(api_key);
+      const ins = db.prepare('INSERT INTO api_tb_mappings (api_key, tb_device_id, enabled, telemetry_enabled, attributes_enabled, telemetry_interval_ms, attributes_interval_ms) VALUES (?,?,?,?,?,?,?)');
+      mappings.forEach(m => {
+        ins.run(api_key, m.tb_device_id, 1, m.telemetry_enabled ? 1 : 0, m.attributes_enabled ? 1 : 0, Number(m.telemetry_interval_ms) || 5000, Number(m.attributes_interval_ms) || 5000);
+      });
+    });
+    tx();
+    res.json({ ok: true });
+  } else if (tb_device_id) {
+    db.prepare('INSERT OR REPLACE INTO api_tb_mappings (api_key, tb_device_id, enabled, telemetry_enabled, attributes_enabled, telemetry_interval_ms, attributes_interval_ms) VALUES (?,?,?,?,?,?,?)')
+      .run(api_key, tb_device_id, 1, telemetry_enabled ? 1 : 0, attributes_enabled ? 1 : 0, Number(telemetry_interval_ms) || 5000, Number(attributes_interval_ms) || 5000);
+    res.json({ ok: true });
+  } else {
+    return res.status(400).json({ error: 'Thiếu mappings hoặc tb_device_id' });
+  }
+});
+
+app.put('/api/api-tb-mappings', (req, res) => {
+  const { api_key, tb_device_id, telemetry_enabled, attributes_enabled, telemetry_interval_ms, attributes_interval_ms } = req.body;
+  if (!api_key || !tb_device_id) return res.status(400).json({ error: 'Thiếu api_key / tb_device_id' });
+  const mapping = db.prepare('SELECT * FROM api_tb_mappings WHERE api_key=? AND tb_device_id=?').get(api_key, tb_device_id);
+  if (!mapping) return res.status(404).json({ error: 'Không tìm thấy mapping' });
+  db.prepare('UPDATE api_tb_mappings SET telemetry_enabled=?, attributes_enabled=?, telemetry_interval_ms=?, attributes_interval_ms=? WHERE api_key=? AND tb_device_id=?')
+    .run(telemetry_enabled != null ? (telemetry_enabled ? 1 : 0) : mapping.telemetry_enabled, attributes_enabled != null ? (attributes_enabled ? 1 : 0) : mapping.attributes_enabled, telemetry_interval_ms != null ? Number(telemetry_interval_ms) : mapping.telemetry_interval_ms, attributes_interval_ms != null ? Number(attributes_interval_ms) : mapping.attributes_interval_ms, api_key, tb_device_id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/api-tb-mappings', (req, res) => {
+  const { api_key, tb_device_id } = req.body;
+  if (!api_key) return res.status(400).json({ error: 'Thiếu api_key' });
+  if (tb_device_id) {
+    db.prepare('DELETE FROM api_tb_mappings WHERE api_key=? AND tb_device_id=?').run(api_key, tb_device_id);
+  } else {
+    db.prepare('DELETE FROM api_tb_mappings WHERE api_key=?').run(api_key);
+  }
+  res.json({ ok: true });
+});
+
 // ---------- THINGSBOARD UPLOAD SERVICE ----------
 const tbLastTelemetry = new Map();
 const tbLastAttributes = new Map();
@@ -782,6 +843,101 @@ async function processThingsBoardUploads() {
   }
 }
 
+// ---------- API TO THINGSBOARD UPLOAD SERVICE ----------
+const apiTbLastTelemetry = new Map();
+const apiTbLastAttributes = new Map();
+const API_TB_CYCLE_INTERVAL_MS = 1000;
+let apiTbLoopTimer = null;
+
+async function uploadApiDataToThingsBoard(tbDevice, apiKey, value, isAttributes) {
+  if (!tbDevice.enabled || value === null || value === undefined) return;
+  const protocol = tbDevice.protocol === 'https' ? 'https' : 'http';
+  const url = `${protocol}://${tbDevice.host}:${tbDevice.port}/api/v1/${tbDevice.access_token}/${isAttributes ? 'attributes' : 'telemetry'}`;
+  const sanitizedKey = apiKey.replace(/[^a-zA-Z0-9_\-\.]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+  const payload = { [sanitizedKey]: value };
+  try {
+    await axios.post(url, payload, { timeout: tbDevice.request_timeout_ms || 5000 });
+    console.log(`[API-TB] Upload ${apiKey} to ${tbDevice.name} (${isAttributes ? 'attributes' : 'telemetry'}) OK`);
+  } catch (err) {
+    const status = err.response?.status;
+    const body = err.response?.data;
+    let hint = '';
+    if (!status && /socket hang up|ECONNRESET|ECONNREFUSED/i.test(err.message || '')) {
+      hint = ` [Gợi ý: không nhận được phản hồi HTTP nào từ server - kiểm tra lại protocol (http/https) và port trong cấu hình "${tbDevice.name}" (URL đang gọi: ${url})]`;
+    }
+    console.error(`[API-TB] Upload ${apiKey} to ${tbDevice.name} failed: ${err.message}${status ? ` (status ${status})` : ''}${body ? ` - ${typeof body === 'string' ? body : JSON.stringify(body)}` : ''}${hint}`);
+  }
+}
+
+async function processApiThingsBoardUploads() {
+  try {
+    const mappings = db.prepare('SELECT m.api_key, m.tb_device_id, m.telemetry_enabled, m.attributes_enabled, m.telemetry_interval_ms, m.attributes_interval_ms FROM api_tb_mappings m JOIN thingsboard_devices tb ON tb.id = m.tb_device_id WHERE tb.enabled=1').all();
+    if (!mappings.length) return;
+
+    const [cleanWater, rawWater, viwater] = await Promise.all([
+      fetchCleanWaterLive(),
+      fetchRawWaterLive(),
+      fetchViwaterLive(),
+    ]);
+    const allData = [...cleanWater, ...rawWater, ...viwater];
+    const dataMap = new Map();
+    allData.forEach(item => {
+      const metrics = item.rawData || {};
+      Object.entries(metrics).forEach(([metric, value]) => {
+        dataMap.set(`${item.tag_name}_${metric}`, value);
+      });
+    });
+
+    const now = Date.now();
+    const tbDeviceIds = [...new Set(mappings.map(m => m.tb_device_id))];
+    const tbDevices = db.prepare('SELECT * FROM thingsboard_devices WHERE id IN (' + tbDeviceIds.map(() => '?').join(',') + ')').all(...tbDeviceIds);
+    const tbMap = new Map(tbDevices.map(tb => [tb.id, tb]));
+
+    const uploadJobs = [];
+    mappings.forEach(m => {
+      const value = dataMap.get(m.api_key);
+      if (value === undefined) return;
+      const tb = tbMap.get(m.tb_device_id);
+      if (!tb) return;
+
+      const telemetryKey = `${m.api_key}_${m.tb_device_id}_telemetry`;
+      const attributesKey = `${m.api_key}_${m.tb_device_id}_attributes`;
+
+      if (m.telemetry_enabled) {
+        const lastTelemetry = apiTbLastTelemetry.get(telemetryKey) || 0;
+        if (now - lastTelemetry >= (m.telemetry_interval_ms || 5000)) {
+          apiTbLastTelemetry.set(telemetryKey, now);
+          uploadJobs.push(uploadApiDataToThingsBoard(tb, m.api_key, value, false));
+        }
+      }
+      if (m.attributes_enabled) {
+        const lastAttributes = apiTbLastAttributes.get(attributesKey) || 0;
+        if (now - lastAttributes >= (m.attributes_interval_ms || 5000)) {
+          apiTbLastAttributes.set(attributesKey, now);
+          uploadJobs.push(uploadApiDataToThingsBoard(tb, m.api_key, value, true));
+        }
+      }
+    });
+    await Promise.all(uploadJobs);
+  } catch (err) {
+    console.error('[API-TB] Process uploads error:', err.message);
+  }
+}
+
+async function apiTbLoopTick() {
+  try {
+    await processApiThingsBoardUploads();
+  } catch (err) {
+    console.error('[API-TB] Loop tick error:', err.message);
+  } finally {
+    apiTbLoopTimer = setTimeout(apiTbLoopTick, API_TB_CYCLE_INTERVAL_MS);
+  }
+}
+
+function startApiThingsBoardService() {
+  apiTbLoopTick();
+}
+
 // Tự lên lịch lại SAU KHI chu kỳ trước xử lý xong, thay vì setInterval cố định -
 // tránh chồng chéo (overlap) nhiều chu kỳ chạy song song khi có hàng nghìn tag khiến
 // 1 chu kỳ mất hơn 1 giây.
@@ -799,6 +955,7 @@ async function tbLoopTick() {
 
 function startThingsBoardService() {
   tbLoopTick();
+  startApiThingsBoardService();
 }
 
 startThingsBoardService();
