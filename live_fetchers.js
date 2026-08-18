@@ -1,5 +1,4 @@
 // --- MOCK STATE & CONSTANTS ---
-const API_FETCH_INTERVAL = 10000;
 const state = {
     cleanWaterTokenCache: { token: null, expiresAt: 0 },
     cachedCleanWaterData: [],
@@ -78,8 +77,8 @@ async function getCleanWaterToken(forceRefresh = false) {
     return token;
 }
 
-async function fetchCleanWaterLive() {
-    if (Date.now() - state.lastCleanWaterFetch < API_FETCH_INTERVAL) return state.cachedCleanWaterData;
+async function fetchCleanWaterLive(fetchIntervalMs = 10000) {
+    if (Date.now() - state.lastCleanWaterFetch < fetchIntervalMs) return state.cachedCleanWaterData;
     console.log(`[${new Date().toLocaleTimeString('vi-VN')}] 🌐 [API FETCH] Đang kéo dữ liệu Nước Sạch (mdcapi)...`);
     try {
         let token;
@@ -111,8 +110,8 @@ async function fetchCleanWaterLive() {
     } catch (e) { return state.cachedCleanWaterData; }
 }
 
-async function fetchRawWaterLive() {
-    if (Date.now() - state.lastRawWaterFetch < API_FETCH_INTERVAL) return state.cachedRawWaterData;
+async function fetchRawWaterLive(fetchIntervalMs = 10000) {
+    if (Date.now() - state.lastRawWaterFetch < fetchIntervalMs) return state.cachedRawWaterData;
     console.log(`[${new Date().toLocaleTimeString('vi-VN')}] 🌐 [API FETCH] Đang kéo dữ liệu Nước Thô...`);
     try {
         const url = 'http://api.dulieuquantrac.com/?day=0&key=YTozOntzOjI6ImlkIjtpOjQyMTg7czozOiJ0YmwiO3M6MjY6InRibF90dmFfcXVhbnRyYWNfY3RuY2FudGhvIjtzOjM6ImtleSI7czozMjoiNGZkMTRiMmRlYzg0MWU4YWVkZjdkZTFkNzRmMzY2OGQiO30%3D';
@@ -132,8 +131,8 @@ async function fetchRawWaterLive() {
     } catch (e) { return state.cachedRawWaterData; }
 }
 
-async function fetchViwaterLive() {
-    if (Date.now() - state.lastViwaterFetch < API_FETCH_INTERVAL) return state.cachedViwaterData;
+async function fetchViwaterLive(fetchIntervalMs = 10000) {
+    if (Date.now() - state.lastViwaterFetch < fetchIntervalMs) return state.cachedViwaterData;
     console.log(`[${new Date().toLocaleTimeString('vi-VN')}] 🌐 [API FETCH] Đang kéo dữ liệu Viwater...`);
     try {
         const baseUrl = 'https://viwater.ctn-cantho.com.vn/VivaServices//Service1.svc';

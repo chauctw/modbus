@@ -90,12 +90,15 @@
           <tbody id="tagTableBody"></tbody>
         </table>
       </div>
+      <div id="tagPagination" class="pagination"></div>
+
+      <div id="liveFetchConfigBar" style="display:none" class="live-fetch-config-bar">
+        <h2 id="liveFetchTitle">Channel API Fetch</h2>
+        <span id="liveFetchStatus" class="muted"></span>
+        <div class="api-fetch-configs" id="apiFetchConfigs"></div>
+      </div>
 
       <div id="liveFetchTableWrap" style="display:none">
-        <div class="live-fetch-header">
-          <h2 id="liveFetchTitle">Channel API Fetch</h2>
-          <span id="liveFetchStatus" class="muted"></span>
-        </div>
         <div class="table-wrap">
           <table id="liveFetchTable">
             <colgroup>
@@ -120,6 +123,7 @@
           </table>
         </div>
       </div>
+      <div id="liveFetchPagination" class="pagination"></div>
 
       <div id="tbDeviceTableWrap" class="table-wrap" style="display:none">
         <table id="tbDeviceTable">
@@ -156,7 +160,7 @@
           <tbody id="tbDeviceTableBody"></tbody>
         </table>
       </div>
-      <div id="tagPagination" class="pagination"></div>
+      <div id="tbDevicePagination" class="pagination"></div>
 
       <div id="emptyState" class="empty-state">
         <p>Chọn 1 device ở cây bên trái, hoặc bấm <b>Import JSON</b> để bắt đầu.</p>

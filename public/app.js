@@ -7,7 +7,8 @@ let state = {
   sort: 'sort_order',
   dir: 'asc',
   page: 1,
-  pageSize: 200,
+  pageSize: 999999, // Đã tăng tối đa để không phân trang
+  total: 0,
   selected: new Set(),
   dataTypes: {},
   realtimeEnabled: false,
@@ -15,7 +16,22 @@ let state = {
   realtimeFilter: false,
   tbDevices: [],
   tbFilter: false,
+  tbPage: 1,
+  tbPageSize: 999999, // Đã tăng tối đa để không phân trang
+  tbTotal: 0,
+  lfPage: 1,
+  lfPageSize: 999999, // Đã tăng tối đa để không phân trang
+  lfTotal: 0,
 };
+
+// Auto adjust pageSize - Đã vô hiệu hóa để hiển thị toàn bộ dữ liệu trên thanh cuộn dọc
+let _pageSizeDebounce;
+function updatePageSize() {
+  return;
+}
+updatePageSize();
+window.addEventListener('resize', updatePageSize);
+window.addEventListener('orientationchange', updatePageSize);
 
 let realtimePollMs = 2000;
 
@@ -77,16 +93,15 @@ function renderTree() {
     if (ch.name === '__REALTIME__') return;
     const devices = ch.devices.filter((d) => !filter || d.name.toLowerCase().includes(filter) || ch.name.toLowerCase().includes(filter));
     if (filter && !ch.name.toLowerCase().includes(filter) && !devices.length) return;
-    const totalTags = ch.devices.reduce((s, d) => s + d.tagCount, 0);
-    const isExpanded = expandedChannels.has(String(ch.id)) || state.currentChannelId === ch.id;
+        
+    const isExpanded = expandedChannels.has(String(ch.id));
 
     const chDiv = document.createElement('div');
     chDiv.className = 'tree-channel';
     chDiv.innerHTML = `
       <div class="tree-channel-row ${isExpanded ? 'expanded' : ''}" data-channel="${ch.id}">
         <span class="tree-channel-toggle">▶</span>
-        <span class="tree-channel-name">📁 ${escapeHtml(ch.name)}</span>
-        <span class="badge">${ch.devices.length} dev / ${totalTags} tag</span>
+        <span class="tree-channel-name">${escapeHtml(ch.name).toUpperCase()}</span>
         <button class="tree-channel-actions" title="Tùy chọn">⋯</button>
       </div>
       <div class="tree-devices ${isExpanded ? '' : 'collapsed'}"></div>
@@ -98,7 +113,7 @@ function renderTree() {
       row.dataset.device = d.id;
       row.dataset.channel = ch.id;
       row.dataset.type = 'modbus';
-      row.innerHTML = `<span>🖥 ${escapeHtml(d.name)}</span><span class="badge">${d.tagCount}</span>`;
+      row.innerHTML = `<span>${escapeHtml(d.name)}</span>`;
       row.addEventListener('click', (e) => {
         e.stopPropagation();
         selectDevice(ch.id, d.id);
@@ -139,8 +154,7 @@ function renderTree() {
   const tbDevices = state.tbDevices.filter((tb) => !filter || tb.name.toLowerCase().includes(filter));
   tbSection.innerHTML = `
     <div class="tree-channel-row" data-channel="__tb__">
-      <span class="tree-channel-name">📡 ThingsBoard</span>
-      <span class="badge">${tbDevices.length} device</span>
+      <span class="tree-channel-name">THINGSBOARD</span>
       <button class="tree-channel-actions" title="Thêm thiết bị TB">+</button>
     </div>
   `;
@@ -154,14 +168,18 @@ function renderTree() {
     } else {
       state.currentChannelId = '__tb__';
       state.currentDeviceId = null;
+      currentLiveSource = null; 
       expandedChannels.clear();
       $('#emptyState').style.display = 'none';
       $('#deviceHeader').style.display = 'none';
       $('#tagToolbar').style.display = 'none';
       $('#tagTableWrap').style.display = 'none';
       $('#tagPagination').style.display = 'none';
-      $('#tbDeviceTableWrap').style.display = 'block';
+      $('#liveFetchConfigBar').style.display = 'none'; 
       $('#liveFetchTableWrap').style.display = 'none';
+      $('#liveFetchPagination').style.display = 'none'; 
+      $('#tbDeviceTableWrap').style.display = 'block';
+      $('#tbDevicePagination').style.display = 'none'; 
       renderTbDeviceList(state.tbDevices);
       renderTree();
     }
@@ -176,15 +194,20 @@ function renderTree() {
 
   const apiSection = document.createElement('div');
   apiSection.className = 'tree-channel';
-  const activeApiSource = currentLiveSource ? liveFetchSources.find(s => s.key === currentLiveSource) : null;
+  
+  // 1. Kiểm tra trạng thái đóng/mở của thư mục API Fetch
+  const isApiExpanded = expandedChannels.has('__api__'); 
+  
+  // 2. Thêm icon mũi tên (tree-channel-toggle) vào giao diện
   apiSection.innerHTML = `
-    <div class="tree-channel-row" data-channel="__api__">
-      <span class="tree-channel-name">📡 Channel API Fetch</span>
-      <span class="badge">${activeApiSource ? activeApiSource.label : 'Chưa chọn'}</span>
+    <div class="tree-channel-row ${isApiExpanded ? 'expanded' : ''}" data-channel="__api__">
+      <span class="tree-channel-toggle">▶</span>
+      <span class="tree-channel-name">CHANNEL API FETCH</span>
       <button class="tree-channel-actions" title="Tùy chọn">⋯</button>
     </div>
-    <div class="tree-devices"></div>
+    <div class="tree-devices ${isApiExpanded ? '' : 'collapsed'}"></div>
   `;
+  
   const apiDevicesEl = apiSection.querySelector('.tree-devices');
   liveFetchSources.forEach((src) => {
     const row = document.createElement('div');
@@ -192,7 +215,10 @@ function renderTree() {
     row.dataset.device = src.key;
     row.dataset.channel = '__api__';
     row.dataset.type = 'api';
-    row.innerHTML = `<span>${src.icon} ${escapeHtml(src.label)}</span>`;
+    
+    // 3. Thêm hàm .toUpperCase() để viết hoa NƯỚC SẠCH, NƯỚC THÔ, VIWATER
+    row.innerHTML = `<span>${escapeHtml(src.label).toUpperCase()}</span>`; 
+    
     row.addEventListener('click', (e) => {
       e.stopPropagation();
       selectLiveSource(src.key);
@@ -200,9 +226,26 @@ function renderTree() {
     apiDevicesEl.appendChild(row);
   });
 
+  // 4. Bắt sự kiện click vào mũi tên để thu gọn/mở rộng dropdown
+  apiSection.querySelector('.tree-channel-toggle').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (expandedChannels.has('__api__')) {
+      expandedChannels.delete('__api__');
+    } else {
+      expandedChannels.add('__api__');
+    }
+    renderTree();
+  });
+
+  // 5. Cập nhật sự kiện click vào tên thư mục: Đổi thành thu gọn/mở rộng (đồng bộ với Modbus) thay vì tự động chọn mục con đầu tiên
   apiSection.querySelector('.tree-channel-name').addEventListener('click', (e) => {
     e.stopPropagation();
-    selectLiveSource(currentLiveSource ? null : liveFetchSources[0].key);
+    if (expandedChannels.has('__api__')) {
+      expandedChannels.delete('__api__');
+    } else {
+      expandedChannels.add('__api__');
+    }
+    renderTree();
   });
 
   apiSection.querySelector('.tree-channel-actions').addEventListener('click', (e) => {
@@ -300,9 +343,14 @@ async function selectDevice(channelId, deviceId) {
   $('#deviceHeader').style.display = 'flex';
   $('#tagToolbar').style.display = 'flex';
   $('#tagTableWrap').style.display = 'block';
-  $('#tagPagination').style.display = 'block';
+  $('#tagPagination').style.display = 'none'; // Đã ẩn
   $('#tbDeviceTableWrap').style.display = 'none';
+  $('#tbDevicePagination').style.display = 'none';
+  
+  $('#liveFetchConfigBar').style.display = 'none'; 
   $('#liveFetchTableWrap').style.display = 'none';
+  $('#liveFetchPagination').style.display = 'none';
+  
   $('#deviceTitle').textContent = dev.name;
   const tbInfo = dev.default_tb_device ? `📡 ${escapeHtml(dev.default_tb_device.name)}` : 'Chưa gán';
   $('#deviceMeta').innerHTML = `IP: ${dev.ip || '-'} | Slave ID: ${dev.slave_id ?? '-'} | Scan: ${dev.scan_rate_ms}ms | Timeout: ${dev.conn_timeout_s}s / ${dev.req_timeout_ms}ms | Byte Swap: ${dev.byte_swap ? 'Bật' : 'Tắt'} | Word Swap: ${dev.word_swap ? 'Bật' : 'Tắt'} | Thiết bị TB: ${tbInfo}`;
@@ -331,7 +379,10 @@ function showEmptyState() {
   $('#tagTableWrap').style.display = 'none';
   $('#tagPagination').style.display = 'none';
   $('#tbDeviceTableWrap').style.display = 'none';
+  $('#tbDevicePagination').style.display = 'none';
+  $('#liveFetchConfigBar').style.display = 'none';
   $('#liveFetchTableWrap').style.display = 'none';
+  $('#liveFetchPagination').style.display = 'none';
   expandedChannels.clear();
   state.currentChannelId = null;
   state.currentDeviceId = null;
@@ -344,6 +395,7 @@ async function selectTbDevice(tb) {
   state.currentChannelId = '__tb__';
   state.currentDeviceId = `tb-${tb.id}`;
   state.page = 1;
+  state.tbPage = 1;
   state.selected.clear();
   expandedChannels.clear();
   expandedChannels.add('__tb__');
@@ -364,8 +416,13 @@ async function selectTbDevice(tb) {
 
   $('#tagTableWrap').style.display = 'none';
   $('#tagPagination').style.display = 'none';
+  
+  $('#liveFetchConfigBar').style.display = 'none';
   $('#liveFetchTableWrap').style.display = 'none';
+  $('#liveFetchPagination').style.display = 'none';
+  
   $('#tbDeviceTableWrap').style.display = 'block';
+  $('#tbDevicePagination').style.display = 'none';
   renderTbDeviceList(state.tbDevices);
 }
 
@@ -447,17 +504,21 @@ function openDuplicateForm(dev) {
 }
 
 async function loadTbDevices() {
+  state.tbPage = 1;
   state.tbDevices = await api('/api/thingsboard-devices');
 }
 
 function renderTbDeviceList(tbDevices) {
   const tbody = $('#tbDeviceTableBody');
   tbody.innerHTML = '';
-  tbDevices.forEach((tb, idx) => {
+  const start = 0;
+  const pageItems = tbDevices; // Lấy toàn bộ thiết bị, không cắt trang
+  state.tbTotal = tbDevices.length;
+  pageItems.forEach((tb, idx) => {
     const tr = document.createElement('tr');
     tr.dataset.id = tb.id;
     tr.innerHTML = `
-      <td class="muted">${idx + 1}</td>
+      <td class="muted">${start + idx + 1}</td>
       <td title="${escapeHtml(tb.name)}">${escapeHtml(tb.name)}</td>
       <td title="${escapeHtml(tb.host)}">${escapeHtml(tb.host)}</td>
       <td class="muted">${tb.port}</td>
@@ -548,12 +609,6 @@ async function getDataTypes() {
   return dataTypesCache;
 }
 
-// Tự co giãn width của input theo đúng bề rộng PIXEL thực tế của nội dung
-// (đo bằng canvas theo đúng font đang áp dụng), thay vì áng chừng theo số
-// ký tự bằng đơn vị "ch" — vì font của app là font không đều (proportional:
-// Segoe UI/Roboto/Helvetica...), nhiều ký tự (chữ hoa, chữ có dấu tiếng
-// Việt...) rộng hơn ký tự "0" nên cách tính theo "ch" hay bị hụt, làm chữ
-// bị che dù cột bảng còn đủ chỗ.
 let _measureCanvas = null;
 function measureTextWidth(text, font) {
   if (!_measureCanvas) _measureCanvas = document.createElement('canvas');
@@ -566,7 +621,7 @@ function autoSizeCellInput(el) {
   const style = getComputedStyle(el);
   const font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
   const textWidth = measureTextWidth(el.value, font);
-  const paddingBorder = 4 + 4 + 2 + 2; // padding trái/phải (2px*2) + border (1px*2) + đệm an toàn
+  const paddingBorder = 4 + 4 + 2 + 2; 
   el.style.width = Math.max(40, Math.ceil(textWidth) + paddingBorder + 8) + 'px';
   el.title = el.value || '';
 }
@@ -574,13 +629,15 @@ function autoSizeCellInput(el) {
 async function loadTags() {
   const dataTypes = await getDataTypes();
   const q = new URLSearchParams({
-    search: state.tagSearch, sort: state.sort, dir: state.dir, page: state.page, pageSize: state.pageSize,
+    search: state.tagSearch, sort: state.sort, dir: state.dir,
+    page: 1, pageSize: 999999, // Yêu cầu API trả toàn bộ
     realtime: state.realtimeFilter ? 1 : 0,
     tb: state.tbFilter ? 1 : 0,
   });
   const isTbDevice = state.currentDeviceId && String(state.currentDeviceId).startsWith('tb-');
   const endpoint = isTbDevice ? `/api/tb-devices/${state.currentDeviceId.replace('tb-', '')}/tags?${q}` : `/api/devices/${state.currentDeviceId}/tags?${q}`;
-  const { total, rows } = await api(endpoint);
+  const { total, page, pageSize, rows } = await api(endpoint);
+  state.total = total;
   $('#tagCountLabel').textContent = `${total} tag`;
   $('#filterOnBtn').classList.toggle('btn-primary', state.realtimeFilter);
   $('#filterTbBtn').classList.toggle('btn-primary', state.tbFilter);
@@ -588,10 +645,10 @@ async function loadTags() {
 
   const tbody = $('#tagTableBody');
   tbody.innerHTML = '';
-rows.forEach((tag, idx) => {
+  rows.forEach((tag, idx) => {
      const tr = document.createElement('tr');
      tr.dataset.id = tag.id;
-     const stt = (state.page - 1) * state.pageSize + idx + 1;
+     const stt = idx + 1;
      const scalingLabel = tag.scaling_type ? 'Linear' : 'None';
      const rtClass = tag.realtime_enabled ? 'on' : 'off';
      const tbTelemetryClass = tag.tb_telemetry_enabled ? 'on' : 'off';
@@ -691,8 +748,6 @@ rows.forEach((tag, idx) => {
       if (el) el.addEventListener('input', () => autoSizeCellInput(el));
     });
   });
-
-  renderPagination(total);
 
   const anyOn = document.querySelectorAll('#tagTableBody .rt-toggle.on').length > 0;
   if (anyOn && !state.realtimeEnabled) startRealtime();
@@ -819,18 +874,6 @@ async function saveInlineEdit(id, tr) {
   } catch (e) { alert(e.message); await loadTags(); }
 }
 
-function renderPagination(total) {
-  const pages = Math.max(1, Math.ceil(total / state.pageSize));
-  const el = $('#tagPagination');
-  el.innerHTML = `
-    <button class="btn" id="prevPage" ${state.page <= 1 ? 'disabled' : ''}>‹ Trước</button>
-    <span class="muted">Trang ${state.page}/${pages}</span>
-    <button class="btn" id="nextPage" ${state.page >= pages ? 'disabled' : ''}>Sau ›</button>
-  `;
-  $('#prevPage').onclick = () => { state.page--; loadTags(); };
-  $('#nextPage').onclick = () => { state.page++; loadTags(); };
-}
-
 function updateBulkButtons() {
   const has = state.selected.size > 0;
   $('#bulkDeleteBtn').disabled = !has;
@@ -850,6 +893,7 @@ document.querySelectorAll('#tagTable th[data-sort]').forEach((th) => {
     const col = th.dataset.sort;
     if (state.sort === col) state.dir = state.dir === 'asc' ? 'desc' : 'asc';
     else { state.sort = col; state.dir = 'asc'; }
+    state.page = 1;
     loadTags();
   });
 });
@@ -1052,6 +1096,7 @@ let liveFetchTimer = null;
 let liveFetchData = { cleanWater: [], rawWater: [], viwater: [] };
 let currentLiveSource = null;
 let apiTbMappings = {};
+let apiFetchConfigs = {};
 
 const liveFetchSources = [
   { key: 'cleanWater', label: 'Nước Sạch', icon: '💧' },
@@ -1078,6 +1123,28 @@ async function loadApiTbMappings() {
   }
 }
 
+async function loadApiFetchConfigs() {
+  try {
+    apiFetchConfigs = await api('/api/api-fetch-configs');
+  } catch (e) {
+    console.error('Failed to load API fetch configs:', e);
+    apiFetchConfigs = {};
+  }
+}
+
+async function saveApiFetchConfig(channelKey, config) {
+  try {
+    await api(`/api/api-fetch-configs/${channelKey}`, {
+      method: 'PUT',
+      body: JSON.stringify(config),
+    });
+    apiFetchConfigs[channelKey] = { ...apiFetchConfigs[channelKey], ...config };
+  } catch (e) {
+    console.error('Failed to save API fetch config:', e);
+    alert('Lưu cấu hình thất bại: ' + e.message);
+  }
+}
+
 async function saveApiTbMappings(apiKey, mappings) {
   try {
     await api('/api/api-tb-mappings', {
@@ -1101,37 +1168,74 @@ async function loadLiveFetch() {
   }
 }
 
+function getConfigKey(sourceKey) {
+  const map = { cleanWater: 'clean_water', rawWater: 'raw_water', viwater: 'viwater' };
+  return map[sourceKey] || sourceKey;
+}
+
 function renderLiveFetchTable() {
   const tbody = $('#liveFetchTableBody');
   tbody.innerHTML = '';
   if (!currentLiveSource) {
+    $('#liveFetchConfigBar').style.display = 'none';
     $('#liveFetchTableWrap').style.display = 'none';
     return;
   }
   const sourceLabel = liveFetchSources.find(s => s.key === currentLiveSource)?.label || currentLiveSource;
   $('#liveFetchTitle').textContent = `Channel API Fetch - ${sourceLabel}`;
+  
+  const configKey = getConfigKey(currentLiveSource);
+  const config = apiFetchConfigs[configKey] || {};
+  const configEl = $('#apiFetchConfigs');
+  configEl.innerHTML = `
+    <div class="api-fetch-config-item">
+      <label>Chu kỳ fetch (ms):</label>
+      <input type="number" id="apiFetchInterval-${currentLiveSource}" value="${config.fetch_interval_ms || 10000}" min="1000" step="1000" />
+      <button class="btn btn-small" id="saveApiFetchConfig-${currentLiveSource}">Lưu cấu hình</button>
+      <span id="apiFetchSaveStatus-${currentLiveSource}" class="muted"></span>
+    </div>
+    <span id="liveFetchStatus" class="muted"></span>
+  `;
+  $('#saveApiFetchConfig-' + currentLiveSource)?.addEventListener('click', async () => {
+    const interval = Number($('#apiFetchInterval-' + currentLiveSource).value) || 10000;
+    $('#apiFetchSaveStatus-' + currentLiveSource).textContent = 'Đang lưu...';
+    await saveApiFetchConfig(configKey, { fetch_interval_ms: interval });
+    $('#apiFetchSaveStatus-' + currentLiveSource).textContent = 'Đã lưu';
+    setTimeout(() => { $('#apiFetchSaveStatus-' + currentLiveSource).textContent = ''; }, 1500);
+  });
+  
+  $('#liveFetchConfigBar').style.display = 'flex';
   const items = liveFetchData[currentLiveSource] || [];
+  const allRows = [];
+  let rowIdx = 0;
   items.forEach((item, idx) => {
     const key = item.tag_name;
     const metrics = item.rawData || {};
     Object.entries(metrics).forEach(([metric, value]) => {
-      const tr = document.createElement('tr');
-      const fullKey = `${key}_${metric}`;
-      const mappings = apiTbMappings[fullKey] || [];
-      const tbNames = mappings.map(m => {
-        const tb = state.tbDevices.find(t => t.id === m.tb_device_id);
-        return tb ? tb.name : 'Unknown';
-      }).join(', ') || '—';
-      tr.innerHTML = `
-        <td class="muted">${idx + 1}</td>
-        <td title="${escapeHtml(fullKey)}">${escapeHtml(fullKey)}</td>
-        <td class="muted">${escapeHtml(String(value))}</td>
-        <td><button class="rt-toggle ${mappings.some(m => m.telemetry_enabled) ? 'on' : 'off'}" data-lf-telemetry="${escapeHtml(fullKey)}" ${!mappings.length ? 'disabled' : ''}>${mappings.some(m => m.telemetry_enabled) ? 'ON' : 'OFF'}</button></td>
-        <td><button class="rt-toggle ${mappings.some(m => m.attributes_enabled) ? 'on' : 'off'}" data-lf-attributes="${escapeHtml(fullKey)}" ${!mappings.length ? 'disabled' : ''}>${mappings.some(m => m.attributes_enabled) ? 'ON' : 'OFF'}</button></td>
-        <td class="cell-tb-devices" data-lf-tb="${escapeHtml(fullKey)}" style="cursor:pointer;color:var(--accent)" title="${escapeHtml(tbNames)}">${escapeHtml(tbNames)}</td>
-      `;
-      tbody.appendChild(tr);
+      allRows.push({ rowIdx, idx, key, metric, value, fullKey: `${key}_${metric}` });
+      rowIdx++;
     });
+  });
+
+  state.lfTotal = allRows.length;
+  const pageRows = allRows; // Đã loại bỏ logic cắt trang
+
+  pageRows.forEach((row) => {
+    const tr = document.createElement('tr');
+    const mappings = apiTbMappings[row.fullKey] || [];
+    const tbNames = mappings.map(m => {
+      const tb = state.tbDevices.find(t => t.id === m.tb_device_id);
+      return tb ? tb.name : 'Unknown';
+    }).join(', ') || '—';
+    tr.innerHTML = `
+      <td class="muted">${row.rowIdx + 1}</td>
+      <td title="${escapeHtml(row.fullKey)}">${escapeHtml(row.fullKey)}</td>
+      <td class="muted">${escapeHtml(String(row.value))}</td>
+      <td><button class="rt-toggle ${mappings.some(m => m.telemetry_enabled) ? 'on' : 'off'}" data-lf-telemetry="${escapeHtml(row.fullKey)}" ${!mappings.length ? 'disabled' : ''}>${mappings.some(m => m.telemetry_enabled) ? 'ON' : 'OFF'}</button></td>
+      <td><button class="rt-toggle ${mappings.some(m => m.attributes_enabled) ? 'on' : 'off'}" data-lf-attributes="${escapeHtml(row.fullKey)}" ${!mappings.length ? 'disabled' : ''}>${mappings.some(m => m.attributes_enabled) ? 'ON' : 'OFF'}</button></td>
+      <td class="cell-tb-devices" data-lf-tb="${escapeHtml(row.fullKey)}" style="cursor:pointer;color:var(--accent)" title="${escapeHtml(tbNames)}">${escapeHtml(tbNames)}</td>
+    `;
+    tbody.appendChild(tr);
   });
   $('#liveFetchTableWrap').style.display = 'block';
 }
@@ -1193,6 +1297,7 @@ async function selectLiveSource(key) {
   currentLiveSource = key;
   state.currentDeviceId = null;
   state.currentChannelId = '__api__';
+  state.lfPage = 1;
   expandedChannels.clear();
   expandedChannels.add('__api__');
   $('#emptyState').style.display = 'none';
@@ -1201,8 +1306,10 @@ async function selectLiveSource(key) {
   $('#tagTableWrap').style.display = 'none';
   $('#tagPagination').style.display = 'none';
   $('#tbDeviceTableWrap').style.display = 'none';
+  $('#tbDevicePagination').style.display = 'none';
   await loadTbDevices();
   renderLiveFetchTable();
+  $('#liveFetchPagination').style.display = 'none';
   renderTree();
 }
 
@@ -1249,5 +1356,6 @@ $('#liveFetchTableBody').addEventListener('click', (e) => {
   await loadTree();
   await loadTbDevices();
   await loadApiTbMappings();
+  await loadApiFetchConfigs();
   startLiveFetchPolling();
 })();

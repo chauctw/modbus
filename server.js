@@ -286,7 +286,7 @@ app.post('/api/devices/:id/duplicate', (req, res) => {
 
 // ---------- TAGS ----------
 app.get('/api/devices/:deviceId/tags', (req, res) => {
-  const { search = '', sort = 'sort_order', dir = 'asc', page = 1, pageSize = 200, realtime, tb } = req.query;
+  const { search = '', sort = 'sort_order', dir = 'asc', page = 1, pageSize = 20, realtime, tb } = req.query;
   const allowedSort = ['name', 'address', 'data_type', 'rw_access', 'scaling_type', 'sort_order', 'id'];
   const sortCol = allowedSort.includes(sort) ? sort : 'sort_order';
   const sortDir = dir === 'desc' ? 'DESC' : 'ASC';
@@ -339,7 +339,7 @@ app.get('/api/devices/:deviceId/tags', (req, res) => {
 });
 
 app.get('/api/tb-devices/:tbDeviceId/tags', (req, res) => {
-  const { search = '', sort = 'sort_order', dir = 'asc', page = 1, pageSize = 200 } = req.query;
+  const { search = '', sort = 'sort_order', dir = 'asc', page = 1, pageSize = 20 } = req.query;
   const allowedSort = ['name', 'address', 'data_type', 'rw_access', 'scaling_type', 'sort_order', 'id'];
   const sortCol = allowedSort.includes(sort) ? sort : 'sort_order';
   const sortDir = dir === 'desc' ? 'DESC' : 'ASC';
@@ -545,8 +545,15 @@ app.post('/api/devices/:id/live-disconnect', (req, res) => {
 
 // ---------- THINGSBOARD ----------
 app.get('/api/thingsboard-devices', (req, res) => {
-  const rows = db.prepare('SELECT * FROM thingsboard_devices ORDER BY sort_order, id').all();
-  res.json(rows);
+  const { page, pageSize } = req.query;
+  if (!page || !pageSize) {
+    const rows = db.prepare('SELECT * FROM thingsboard_devices ORDER BY sort_order, id').all();
+    return res.json(rows);
+  }
+  const total = db.prepare('SELECT COUNT(*) c FROM thingsboard_devices').get().c;
+  const offset = (Number(page) - 1) * Number(pageSize);
+  const rows = db.prepare('SELECT * FROM thingsboard_devices ORDER BY sort_order, id LIMIT ? OFFSET ?').all(Number(pageSize), offset);
+  res.json({ total, page: Number(page), pageSize: Number(pageSize), rows });
 });
 
 app.post('/api/thingsboard-devices', (req, res) => {
@@ -632,15 +639,39 @@ app.get('/api/health', (req, res) => res.json({ ok: true, time: new Date().toISO
 
 app.get('/api/live-fetch', async (req, res) => {
   try {
+    const configs = getApiFetchConfigs();
     const [cleanWater, rawWater, viwater] = await Promise.all([
-      fetchCleanWaterLive(),
-      fetchRawWaterLive(),
-      fetchViwaterLive(),
+      fetchCleanWaterLive(configs.clean_water?.fetch_interval_ms || 10000),
+      fetchRawWaterLive(configs.raw_water?.fetch_interval_ms || 10000),
+      fetchViwaterLive(configs.viwater?.fetch_interval_ms || 10000),
     ]);
     res.json({ cleanWater, rawWater, viwater });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+function getApiFetchConfigs() {
+  const rows = db.prepare('SELECT channel_key, label, fetch_interval_ms FROM api_fetch_configs').all();
+  const map = {};
+  rows.forEach((r) => { map[r.channel_key] = { label: r.label, fetch_interval_ms: r.fetch_interval_ms }; });
+  return map;
+}
+
+app.get('/api/api-fetch-configs', (req, res) => {
+  res.json(getApiFetchConfigs());
+});
+
+app.put('/api/api-fetch-configs/:channelKey', (req, res) => {
+  const { fetch_interval_ms } = req.body;
+  const row = db.prepare('SELECT * FROM api_fetch_configs WHERE channel_key=?').get(req.params.channelKey);
+  if (!row) return res.status(404).json({ error: 'Không tìm thấy cấu hình fetch' });
+  if (fetch_interval_ms != null && (!Number.isInteger(fetch_interval_ms) || fetch_interval_ms < 1000)) {
+    return res.status(400).json({ error: 'fetch_interval_ms phải là số nguyên >= 1000' });
+  }
+  db.prepare('UPDATE api_fetch_configs SET fetch_interval_ms=? WHERE channel_key=?')
+    .run(fetch_interval_ms ?? row.fetch_interval_ms, req.params.channelKey);
+  res.json({ ok: true });
 });
 
 app.get('/api/api-tb-mappings', (req, res) => {
@@ -874,10 +905,11 @@ async function processApiThingsBoardUploads() {
     const mappings = db.prepare('SELECT m.api_key, m.tb_device_id, m.telemetry_enabled, m.attributes_enabled, m.telemetry_interval_ms, m.attributes_interval_ms FROM api_tb_mappings m JOIN thingsboard_devices tb ON tb.id = m.tb_device_id WHERE tb.enabled=1').all();
     if (!mappings.length) return;
 
+    const configs = getApiFetchConfigs();
     const [cleanWater, rawWater, viwater] = await Promise.all([
-      fetchCleanWaterLive(),
-      fetchRawWaterLive(),
-      fetchViwaterLive(),
+      fetchCleanWaterLive(configs.clean_water?.fetch_interval_ms || 10000),
+      fetchRawWaterLive(configs.raw_water?.fetch_interval_ms || 10000),
+      fetchViwaterLive(configs.viwater?.fetch_interval_ms || 10000),
     ]);
     const allData = [...cleanWater, ...rawWater, ...viwater];
     const dataMap = new Map();

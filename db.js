@@ -92,6 +92,13 @@ CREATE TABLE IF NOT EXISTS api_tb_mappings (
   UNIQUE(api_key, tb_device_id)
 );
 
+CREATE TABLE IF NOT EXISTS api_fetch_configs (
+  channel_key TEXT PRIMARY KEY,
+  label TEXT,
+  fetch_interval_ms INTEGER DEFAULT 10000,
+  enabled INTEGER DEFAULT 1
+);
+
 CREATE INDEX IF NOT EXISTS idx_devices_channel ON devices(channel_id);
 CREATE INDEX IF NOT EXISTS idx_tags_device ON tags(device_id);
 CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name);
@@ -162,6 +169,22 @@ ensureColumn('devices', 'default_tb_device_id', 'INTEGER');
       }
     } catch (e) { /* ignore */ }
   });
+})();
+
+// Migration: tạo bảng api_fetch_configs và insert default rows nếu chưa có
+(function migrateApiFetchConfigs() {
+  db.exec(`CREATE TABLE IF NOT EXISTS api_fetch_configs (
+    channel_key TEXT PRIMARY KEY,
+    label TEXT,
+    fetch_interval_ms INTEGER DEFAULT 10000
+  )`);
+  const count = db.prepare('SELECT COUNT(*) c FROM api_fetch_configs').get().c;
+  if (count === 0) {
+    const ins = db.prepare('INSERT OR IGNORE INTO api_fetch_configs (channel_key, label, fetch_interval_ms) VALUES (?,?,?)');
+    ins.run('clean_water', 'Nước Sạch', 10000);
+    ins.run('raw_water', 'Nước Thô', 10000);
+    ins.run('viwater', 'Viwater', 10000);
+  }
 })();
 
 module.exports = db;
