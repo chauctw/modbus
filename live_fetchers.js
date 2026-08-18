@@ -43,6 +43,23 @@ async function httpRequest(url, options = {}, bodyData = null, timeoutMs = 6000)
     }
 }
 
+// --- HÀM HỖ TRỢ NORMALIZE KEY ---
+function normalizeApiKey(str) {
+  let s = String(str).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  s = s.replace(/đ/g, 'd').replace(/Đ/g, 'D');
+  s = s.replace(/[^a-zA-Z0-9_\-\.]/g, '_').replace(/[_\-\.]+/g, '_').replace(/^_|_$/g, '');
+  return s;
+}
+
+const VIWATER_METRIC_ALIASES = {
+  'Độ đục': 'Tur',
+  'Nhiệt độ': 'Temp'
+};
+
+function mapViwaterMetricName(name) {
+  return VIWATER_METRIC_ALIASES[name] || name;
+}
+
 // --- HÀM HỖ TRỢ BÓC TÁCH GIÁ TRỊ (Lấy giá trị thực tế từ object) ---
 function extractMetricValues(valueObj) {
     if (!valueObj || typeof valueObj !== 'object') return {};
@@ -94,13 +111,14 @@ async function fetchCleanWaterLive(fetchIntervalMs = 10000) {
         const latestMap = {};
         dataList.forEach(item => {
             if (!item.tag_name) return;
+            const normalizedTag = normalizeApiKey(item.tag_name);
             const timeMs = new Date(item.time_stamp).getTime();
-            const currentTimeMs = latestMap[item.tag_name] ? new Date(latestMap[item.tag_name].time_stamp).getTime() : -1;
-            if (!latestMap[item.tag_name] || timeMs > currentTimeMs) latestMap[item.tag_name] = item;
+            const currentTimeMs = latestMap[normalizedTag] ? new Date(latestMap[normalizedTag].time_stamp).getTime() : -1;
+            if (!latestMap[normalizedTag] || timeMs > currentTimeMs) latestMap[normalizedTag] = item;
         });
         
         state.cachedCleanWaterData = Object.values(latestMap).map(item => ({
-            tag_name: item.tag_name,
+            tag_name: normalizeApiKey(item.tag_name),
             time: item.time_stamp,
             metrics: (item.value && typeof item.value === 'object') ? Object.keys(item.value) : [],
             rawData: extractMetricValues(item.value) // Đã bóc tách lấy giá trị chi tiết
@@ -118,10 +136,13 @@ async function fetchRawWaterLive(fetchIntervalMs = 10000) {
         const parsedData = await httpRequest(url, { method: 'GET' }, null, 6000);
         if (!Array.isArray(parsedData) || parsedData.length === 0) return state.cachedRawWaterData;
         const latestMap = {};
-        parsedData.forEach(item => { if (item.tag && !latestMap[item.tag]) latestMap[item.tag] = item; });
+        parsedData.forEach(item => { 
+            const normalizedTag = normalizeApiKey(item.tag);
+            if (item.tag && !latestMap[normalizedTag]) latestMap[normalizedTag] = item; 
+        });
         
         state.cachedRawWaterData = Object.values(latestMap).map(item => ({
-            tag_name: item.tag,
+            tag_name: normalizeApiKey(item.tag),
             time: item.time || '',
             metrics: (item.data && typeof item.data === 'object') ? Object.keys(item.data) : [],
             rawData: extractMetricValues(item.data) // Đã bóc tách lấy giá trị chi tiết
@@ -142,10 +163,16 @@ async function fetchViwaterLive(fetchIntervalMs = 10000) {
             const siteList = parsed.GetListSiteForDetailTableResult || [];
             const ignoreKeys = new Set(['Location', 'NumberOrdered', 'TimeStamp', 'Status', 'IsLogger']);
             siteList.forEach(site => {
-                const metrics = Object.keys(site).filter(k => !ignoreKeys.has(k) && site[k] !== null && site[k] !== undefined);
+                const metrics = [];
+                const rawDataObj = {};
+                Object.keys(site).forEach(k => {
+                    if (ignoreKeys.has(k) || site[k] === null || site[k] === undefined) return;
+                    const mapped = mapViwaterMetricName(k);
+                    metrics.push(mapped);
+                    rawDataObj[mapped] = site[k];
+                });
                 if (metrics.length > 0) {
-                    const rawDataObj = {}; metrics.forEach(m => rawDataObj[m] = site[m]);
-                    resultList.push({ tag_name: site.Location || ('Site_' + site.NumberOrdered), time: site.TimeStamp || '', metrics, rawData: rawDataObj });
+                    resultList.push({ tag_name: normalizeApiKey(site.Location || ('Site_' + site.NumberOrdered)), time: site.TimeStamp || '', metrics, rawData: rawDataObj });
                 }
             });
         } catch (err) {}
@@ -157,7 +184,10 @@ async function fetchViwaterLive(fetchIntervalMs = 10000) {
             const channels = Array.isArray(r.value) ? r.value : (r.value.GetChannelsResult || []);
             if (channels.length > 0) {
                 const metrics = []; const rawDataObj = {};
-                channels.forEach(ch => { const key = ch.ChannelName || ch.ChannelId; if (key) { metrics.push(key); rawDataObj[key] = ch.Value; } });
+                channels.forEach(ch => { 
+                    const key = mapViwaterMetricName(ch.ChannelName || ch.ChannelId); 
+                    if (key) { metrics.push(key); rawDataObj[key] = ch.Value; } 
+                });
                 resultList.push({ tag_name: loggerId, time: channels[0].Timestamp || '', metrics, rawData: rawDataObj });
             }
         });

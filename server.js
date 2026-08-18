@@ -28,7 +28,7 @@ function removeVietnameseTones(str) {
 
 function sanitizeTbKey(key) {
   const noTone = removeVietnameseTones(key);
-  return noTone.replace(/[^a-zA-Z0-9_\-\.]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+  return noTone.replace(/[^a-zA-Z0-9_\-\.]/g, '_').replace(/[_\-\.]+/g, '_').replace(/^_|_$/g, '');
 }
 
 // ---------- helpers ----------
@@ -884,7 +884,7 @@ async function uploadApiDataToThingsBoard(tbDevice, apiKey, value, isAttributes)
   if (!tbDevice.enabled || value === null || value === undefined) return;
   const protocol = tbDevice.protocol === 'https' ? 'https' : 'http';
   const url = `${protocol}://${tbDevice.host}:${tbDevice.port}/api/v1/${tbDevice.access_token}/${isAttributes ? 'attributes' : 'telemetry'}`;
-  const sanitizedKey = apiKey.replace(/[^a-zA-Z0-9_\-\.]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+  const sanitizedKey = sanitizeTbKey(apiKey);
   const payload = { [sanitizedKey]: value };
   try {
     await axios.post(url, payload, { timeout: tbDevice.request_timeout_ms || 5000 });

@@ -470,6 +470,19 @@ td input:focus, td select:focus {
 .pagination, #tagPagination, #liveFetchPagination, #tbDevicePagination, #filterTbBtn {
   display: none !important;
 }
+/* Ẩn nút Reset */
+#resetBtn {
+  display: none !important;
+}
+
+/* Ẩn stat-card thứ 1*/
+#dashboard .stat-card:nth-child(1) {
+  display: none !important;
+}
+/* Ẩn stat-card thứ 4 (TAGS SCAN ≤100MS) trong khu vực dashboard */
+#dashboard .stat-card:nth-child(4) {
+  display: none !important;
+}
 
 /* ---------------------------------------------------------------------- */
 /* Modal                                                                  */

@@ -73,7 +73,7 @@ async function loadDashboard() {
     <div class="stat-card"><div class="num">${stats.totals.devices}</div><div class="label">DEVICES</div></div>
     <div class="stat-card"><div class="num">${stats.totals.tags}</div><div class="label">TAGS</div></div>
     <div class="stat-card ${fastScan > 500 ? 'warn' : ''}"><div class="num">${fastScan}</div><div class="label">TAGS SCAN &le;100MS</div></div>
-    <div class="stat-card ${problems ? 'danger' : ''}"><div class="num">${problems}</div><div class="label">CẢNH BÁO / TRÙNG LẶP</div></div>
+    <div class="stat-card ${problems ? 'danger' : ''}"><div class="num">${problems}</div><div class="label">TAG TRÙNG LẶP</div></div>
   `;
 }
 
@@ -88,7 +88,117 @@ function renderTree() {
   const treeEl = $('#tree');
   treeEl.innerHTML = '';
 
-  // Modbus channels
+  // =========================================================
+  // 1. THINGSBOARD SECTION (Đưa lên đầu tiên)
+  // =========================================================
+  const tbSection = document.createElement('div');
+  tbSection.className = 'tree-channel';
+  const tbDevices = state.tbDevices.filter((tb) => !filter || tb.name.toLowerCase().includes(filter));
+  tbSection.innerHTML = `
+    <div class="tree-channel-row" data-channel="__tb__">
+      <span class="tree-channel-name">THINGSBOARD DEVICES</span>
+      <button class="tree-channel-actions" title="Thêm thiết bị TB">+</button>
+    </div>
+  `;
+
+  tbSection.querySelector('.tree-channel-name').addEventListener('click', (e) => {
+    e.stopPropagation();
+    
+    // Nếu đang ở màn hình ThingsBoard rồi thì bỏ qua, không làm gì cả
+    if (state.currentChannelId === '__tb__') return; 
+
+    // Nếu chưa ở màn hình ThingsBoard thì mới chuyển sang
+    state.currentChannelId = '__tb__';
+    state.currentDeviceId = null;
+    currentLiveSource = null; 
+    expandedChannels.clear();
+    $('#emptyState').style.display = 'none';
+    $('#deviceHeader').style.display = 'none';
+    $('#tagToolbar').style.display = 'none';
+    $('#tagTableWrap').style.display = 'none';
+    $('#tagPagination').style.display = 'none';
+    $('#liveFetchConfigBar').style.display = 'none'; 
+    $('#liveFetchTableWrap').style.display = 'none';
+    $('#liveFetchPagination').style.display = 'none'; 
+    $('#tbDeviceTableWrap').style.display = 'block';
+    $('#tbDevicePagination').style.display = 'none'; 
+    renderTbDeviceList(state.tbDevices);
+    renderTree();
+  });
+
+  tbSection.querySelector('.tree-channel-actions').addEventListener('click', (e) => {
+    e.stopPropagation();
+    openTbDeviceForm();
+  });
+
+  treeEl.appendChild(tbSection);
+
+  // =========================================================
+  // 2. CHANNEL API FETCH (Đưa lên thứ 2)
+  // =========================================================
+  const apiSection = document.createElement('div');
+  apiSection.className = 'tree-channel';
+  
+  const isApiExpanded = expandedChannels.has('__api__'); 
+  
+  apiSection.innerHTML = `
+    <div class="tree-channel-row ${isApiExpanded ? 'expanded' : ''}" data-channel="__api__">
+      <span class="tree-channel-toggle">▶</span>
+      <span class="tree-channel-name">CHANNEL API FETCH</span>
+      <button class="tree-channel-actions" title="Tùy chọn">⋯</button>
+    </div>
+    <div class="tree-devices ${isApiExpanded ? '' : 'collapsed'}"></div>
+  `;
+  
+  const apiDevicesEl = apiSection.querySelector('.tree-devices');
+  liveFetchSources.forEach((src) => {
+    const row = document.createElement('div');
+    row.className = 'tree-device-row' + (currentLiveSource === src.key ? ' active' : '');
+    row.dataset.device = src.key;
+    row.dataset.channel = '__api__';
+    row.dataset.type = 'api';
+    
+    row.innerHTML = `<span>${escapeHtml(src.label).toUpperCase()}</span>`; 
+    
+    row.addEventListener('click', (e) => {
+      e.stopPropagation();
+      selectLiveSource(src.key);
+    });
+    apiDevicesEl.appendChild(row);
+  });
+
+  apiSection.querySelector('.tree-channel-toggle').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (expandedChannels.has('__api__')) {
+      expandedChannels.delete('__api__');
+    } else {
+      expandedChannels.add('__api__');
+    }
+    renderTree();
+  });
+
+  apiSection.querySelector('.tree-channel-name').addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (expandedChannels.has('__api__')) {
+      expandedChannels.delete('__api__');
+    } else {
+      expandedChannels.add('__api__');
+    }
+    renderTree();
+  });
+
+  apiSection.querySelector('.tree-channel-actions').addEventListener('click', (e) => {
+    e.stopPropagation();
+    currentLiveSource = null;
+    renderLiveFetchTable();
+    renderTree();
+  });
+
+  treeEl.appendChild(apiSection);
+
+  // =========================================================
+  // 3. CÁC KÊNH MODBUS (Đưa xuống cuối cùng)
+  // =========================================================
   state.tree.forEach((ch) => {
     if (ch.name === '__REALTIME__') return;
     const devices = ch.devices.filter((d) => !filter || d.name.toLowerCase().includes(filter) || ch.name.toLowerCase().includes(filter));
@@ -145,117 +255,9 @@ function renderTree() {
       e.stopPropagation();
       openChannelMenu(ch);
     });
+    
     treeEl.appendChild(chDiv);
   });
-
-  // ThingsBoard section
-  const tbSection = document.createElement('div');
-  tbSection.className = 'tree-channel';
-  const tbDevices = state.tbDevices.filter((tb) => !filter || tb.name.toLowerCase().includes(filter));
-  tbSection.innerHTML = `
-    <div class="tree-channel-row" data-channel="__tb__">
-      <span class="tree-channel-name">THINGSBOARD</span>
-      <button class="tree-channel-actions" title="Thêm thiết bị TB">+</button>
-    </div>
-  `;
-
-  tbSection.querySelector('.tree-channel-name').addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (state.currentChannelId === '__tb__') {
-      state.currentChannelId = null;
-      state.currentDeviceId = null;
-      showEmptyState();
-    } else {
-      state.currentChannelId = '__tb__';
-      state.currentDeviceId = null;
-      currentLiveSource = null; 
-      expandedChannels.clear();
-      $('#emptyState').style.display = 'none';
-      $('#deviceHeader').style.display = 'none';
-      $('#tagToolbar').style.display = 'none';
-      $('#tagTableWrap').style.display = 'none';
-      $('#tagPagination').style.display = 'none';
-      $('#liveFetchConfigBar').style.display = 'none'; 
-      $('#liveFetchTableWrap').style.display = 'none';
-      $('#liveFetchPagination').style.display = 'none'; 
-      $('#tbDeviceTableWrap').style.display = 'block';
-      $('#tbDevicePagination').style.display = 'none'; 
-      renderTbDeviceList(state.tbDevices);
-      renderTree();
-    }
-  });
-
-  tbSection.querySelector('.tree-channel-actions').addEventListener('click', (e) => {
-    e.stopPropagation();
-    openTbDeviceForm();
-  });
-
-  treeEl.appendChild(tbSection);
-
-  const apiSection = document.createElement('div');
-  apiSection.className = 'tree-channel';
-  
-  // 1. Kiểm tra trạng thái đóng/mở của thư mục API Fetch
-  const isApiExpanded = expandedChannels.has('__api__'); 
-  
-  // 2. Thêm icon mũi tên (tree-channel-toggle) vào giao diện
-  apiSection.innerHTML = `
-    <div class="tree-channel-row ${isApiExpanded ? 'expanded' : ''}" data-channel="__api__">
-      <span class="tree-channel-toggle">▶</span>
-      <span class="tree-channel-name">CHANNEL API FETCH</span>
-      <button class="tree-channel-actions" title="Tùy chọn">⋯</button>
-    </div>
-    <div class="tree-devices ${isApiExpanded ? '' : 'collapsed'}"></div>
-  `;
-  
-  const apiDevicesEl = apiSection.querySelector('.tree-devices');
-  liveFetchSources.forEach((src) => {
-    const row = document.createElement('div');
-    row.className = 'tree-device-row' + (currentLiveSource === src.key ? ' active' : '');
-    row.dataset.device = src.key;
-    row.dataset.channel = '__api__';
-    row.dataset.type = 'api';
-    
-    // 3. Thêm hàm .toUpperCase() để viết hoa NƯỚC SẠCH, NƯỚC THÔ, VIWATER
-    row.innerHTML = `<span>${escapeHtml(src.label).toUpperCase()}</span>`; 
-    
-    row.addEventListener('click', (e) => {
-      e.stopPropagation();
-      selectLiveSource(src.key);
-    });
-    apiDevicesEl.appendChild(row);
-  });
-
-  // 4. Bắt sự kiện click vào mũi tên để thu gọn/mở rộng dropdown
-  apiSection.querySelector('.tree-channel-toggle').addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (expandedChannels.has('__api__')) {
-      expandedChannels.delete('__api__');
-    } else {
-      expandedChannels.add('__api__');
-    }
-    renderTree();
-  });
-
-  // 5. Cập nhật sự kiện click vào tên thư mục: Đổi thành thu gọn/mở rộng (đồng bộ với Modbus) thay vì tự động chọn mục con đầu tiên
-  apiSection.querySelector('.tree-channel-name').addEventListener('click', (e) => {
-    e.stopPropagation();
-    if (expandedChannels.has('__api__')) {
-      expandedChannels.delete('__api__');
-    } else {
-      expandedChannels.add('__api__');
-    }
-    renderTree();
-  });
-
-  apiSection.querySelector('.tree-channel-actions').addEventListener('click', (e) => {
-    e.stopPropagation();
-    currentLiveSource = null;
-    renderLiveFetchTable();
-    renderTree();
-  });
-
-  treeEl.appendChild(apiSection);
 }
 
 function openChannelMenu(ch) {
@@ -1358,4 +1360,28 @@ $('#liveFetchTableBody').addEventListener('click', (e) => {
   await loadApiTbMappings();
   await loadApiFetchConfigs();
   startLiveFetchPolling();
+
+  // --- THÊM PHẦN NÀY ĐỂ MẶC ĐỊNH CHỌN THINGSBOARD KHI LOAD TRANG ---
+  state.currentChannelId = '__tb__';
+  state.currentDeviceId = null;
+  currentLiveSource = null; 
+  expandedChannels.clear();
+  
+  // Ẩn các màn hình khác
+  $('#emptyState').style.display = 'none';
+  $('#deviceHeader').style.display = 'none';
+  $('#tagToolbar').style.display = 'none';
+  $('#tagTableWrap').style.display = 'none';
+  $('#tagPagination').style.display = 'none';
+  $('#liveFetchConfigBar').style.display = 'none'; 
+  $('#liveFetchTableWrap').style.display = 'none';
+  $('#liveFetchPagination').style.display = 'none'; 
+  
+  // Hiển thị bảng ThingsBoard
+  $('#tbDeviceTableWrap').style.display = 'block';
+  $('#tbDevicePagination').style.display = 'none'; 
+  
+  // Render dữ liệu bảng và làm đậm menu sidebar
+  renderTbDeviceList(state.tbDevices);
+  renderTree();
 })();
