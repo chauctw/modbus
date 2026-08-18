@@ -519,6 +519,22 @@ td input:focus, td select:focus {
 .checkbox-inline { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; cursor: pointer; }
 .checkbox-inline input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
 
+/* Modal table */
+.modal .table-wrap {
+  max-height: 60vh;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.modal table th {
+  font-size: 11px;
+  padding: 10px 12px;
+}
+.modal table td {
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
 /* ---------------------------------------------------------------------- */
 /* Live values & Toggles                                                  */
 /* ---------------------------------------------------------------------- */

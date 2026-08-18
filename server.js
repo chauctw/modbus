@@ -123,11 +123,19 @@ app.get('/api/stats', (req, res) => {
 
 app.get('/api/validate', (req, res) => {
   const dupTagNames = db.prepare(
-    `SELECT device_id, name, COUNT(*) count FROM tags GROUP BY device_id, name HAVING COUNT(*) > 1`
+    `SELECT t.device_id, t.name, COUNT(*) count, GROUP_CONCAT(t.id, ',') tag_ids, d.name device_name, c.name channel_name
+     FROM tags t
+     JOIN devices d ON d.id = t.device_id
+     JOIN channels c ON c.id = d.channel_id
+     GROUP BY t.device_id, t.name HAVING COUNT(*) > 1`
   ).all();
   const dupTagAddress = db.prepare(
-    `SELECT device_id, address, COUNT(*) count FROM tags WHERE address IS NOT NULL AND address != ''
-     GROUP BY device_id, address HAVING COUNT(*) > 1`
+    `SELECT t.device_id, t.address, COUNT(*) count, GROUP_CONCAT(t.id, ',') tag_ids, d.name device_name, c.name channel_name
+     FROM tags t
+     JOIN devices d ON d.id = t.device_id
+     JOIN channels c ON c.id = d.channel_id
+     WHERE t.address IS NOT NULL AND t.address != ''
+     GROUP BY t.device_id, t.address HAVING COUNT(*) > 1`
   ).all();
   const dupDeviceNames = db.prepare(
     `SELECT channel_id, name, COUNT(*) count FROM devices GROUP BY channel_id, name HAVING COUNT(*) > 1`
