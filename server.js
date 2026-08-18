@@ -7,6 +7,7 @@ const db = require('./db');
 const { fetchCleanWaterLive, fetchRawWaterLive, fetchViwaterLive } = require('./live_fetchers');
 const { DATA_TYPES } = require('./datatypes');
 const { readTagsForDevice, closeConnection, closeAll } = require('./modbus-client');
+const { importProject, mergeProject, exportProject } = require('./kepware-io');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
