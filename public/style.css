@@ -494,6 +494,16 @@ td input:focus, td select:focus {
   display: none !important;
 }
 
+
+/* Ẩn mục QUẢN LÝ NGƯỜI DÙNG trên Sidebar */
+.tree-channel:has([data-channel="__users__"]) {
+  display: none !important;
+}
+
+/* Đề phòng trường hợp thẻ nằm độc lập không có class .tree-channel bọc ngoài */
+[data-channel="__users__"] {
+  display: none !important;
+}
 /* ---------------------------------------------------------------------- */
 /* Modal                                                                  */
 /* ---------------------------------------------------------------------- */
@@ -598,4 +608,81 @@ td input:focus, td select:focus {
 #liveFetchTableWrap .table-wrap {
   height: 100%;
   margin-bottom: 0;
+}
+
+.user-info {
+  font-weight: 500;
+  color: var(--text);
+  margin-right: 8px;
+}
+
+.topbar-actions .btn-small {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+#userTableWrap {
+  flex: 1;
+  min-height: 200px;
+  overflow-y: auto !important;
+  overflow-x: auto;
+  margin-bottom: 0 !important;
+  border-radius: var(--radius);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+#userTable {
+  width: 100% !important;
+  min-width: 100% !important;
+  table-layout: auto !important;
+  border-collapse: collapse;
+  background: transparent;
+  border: none;
+}
+
+#userTable th,
+#userTable td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+#userTable thead {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+#userTable th {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #f5f7fa !important;
+  border-bottom: none !important;
+  box-shadow: inset 0 -1px 0 var(--border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  user-select: none;
+}
+
+#userTable th:hover { color: var(--text); background: var(--panel-3) !important; }
+#userTable tbody tr { transition: background 0.15s; }
+#userTable tbody tr:hover td { background: var(--panel-2); }
+#userTable tbody tr:last-child td { border-bottom: none; }
+
+#userTable th:nth-child(2),
+#userTable td:nth-child(2),
+#userTable th:nth-child(4),
+#userTable td:nth-child(4),
+#userTable th:nth-child(5),
+#userTable td:nth-child(5) {
+  text-align: left;
 }

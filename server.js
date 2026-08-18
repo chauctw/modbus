@@ -3,6 +3,8 @@ const multer = require('multer');
 const path = require('path');
 const cors = require('cors');
 const axios = require('axios');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 const db = require('./db');
 const { fetchCleanWaterLive, fetchRawWaterLive, fetchViwaterLive } = require('./live_fetchers');
 const { DATA_TYPES } = require('./datatypes');
@@ -17,6 +19,99 @@ app.use(express.json({ limit: '200mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } });
+
+const JWT_SECRET = process.env.JWT_SECRET || 'kepware-tag-manager-secret-2026';
+
+function authenticate(req, res, next) {
+  const publicPaths = ['/api/auth/login', '/api/health', '/api/import', '/api/import-json'];
+  const isPublic = publicPaths.some(p => req.originalUrl === p || req.originalUrl.startsWith(p + '/'));
+  if (isPublic) return next();
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return res.status(401).json({ error: 'Chưa đăng nhập' });
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Token không hợp lệ hoặc đã hết hạn' });
+  }
+}
+
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: 'Chưa đăng nhập' });
+    if (!roles.includes(req.user.role)) return res.status(403).json({ error: 'Không có quyền truy cập' });
+    next();
+  };
+}
+
+app.use('/api', authenticate);
+
+app.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ error: 'Thiếu username hoặc password' });
+  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+  if (!user) return res.status(401).json({ error: 'Sai tên đăng nhập hoặc mật khẩu' });
+  if (!bcrypt.compareSync(password, user.password_hash)) return res.status(401).json({ error: 'Sai tên đăng nhập hoặc mật khẩu' });
+  const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
+  res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
+});
+
+app.get('/api/auth/me', (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Chưa đăng nhập' });
+  res.json({ user: req.user });
+});
+
+app.post('/api/auth/change-password', (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Chưa đăng nhập' });
+  const { oldPassword, newPassword } = req.body;
+  if (!oldPassword || !newPassword) return res.status(400).json({ error: 'Thiếu mật khẩu cũ hoặc mới' });
+  if (newPassword.length < 6) return res.status(400).json({ error: 'Mật khẩu mới phải có ít nhất 6 ký tự' });
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
+  if (!user) return res.status(404).json({ error: 'Không tìm thấy người dùng' });
+  if (!bcrypt.compareSync(oldPassword, user.password_hash)) return res.status(400).json({ error: 'Mật khẩu cũ không đúng' });
+  const newHash = bcrypt.hashSync(newPassword, 10);
+  db.prepare("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?").run(newHash, req.user.id);
+  res.json({ ok: true });
+});
+
+app.get('/api/users', requireRole('admin'), (req, res) => {
+  const users = db.prepare('SELECT id, username, role, created_at, updated_at FROM users ORDER BY id').all();
+  res.json(users);
+});
+
+app.post('/api/users', requireRole('admin'), (req, res) => {
+  const { username, password, role = 'viewer' } = req.body;
+  if (!username || !password) return res.status(400).json({ error: 'Thiếu username hoặc password' });
+  if (password.length < 6) return res.status(400).json({ error: 'Password phải có ít nhất 6 ký tự' });
+  if (!['admin', 'editor', 'viewer'].includes(role)) return res.status(400).json({ error: 'Role không hợp lệ' });
+  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+  if (existing) return res.status(400).json({ error: 'Username đã tồn tại' });
+  const hash = bcrypt.hashSync(password, 10);
+  const info = db.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)').run(username, hash, role);
+  res.json({ id: info.lastInsertRowid });
+});
+
+app.put('/api/users/:id', requireRole('admin'), (req, res) => {
+  const id = Number(req.params.id);
+  if (id === req.user.id) return res.status(400).json({ error: 'Không thể sửa chính mình qua đây' });
+  const { role } = req.body;
+  if (!['admin', 'editor', 'viewer'].includes(role)) return res.status(400).json({ error: 'Role không hợp lệ' });
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  if (!user) return res.status(404).json({ error: 'Không tìm thấy người dùng' });
+  db.prepare("UPDATE users SET role = ?, updated_at = datetime('now') WHERE id = ?").run(role, id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/users/:id', requireRole('admin'), (req, res) => {
+  const id = Number(req.params.id);
+  if (id === req.user.id) return res.status(400).json({ error: 'Không thể xóa chính mình' });
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+  if (!user) return res.status(404).json({ error: 'Không tìm thấy người dùng' });
+  db.prepare('DELETE FROM users WHERE id = ?').run(id);
+  res.json({ ok: true });
+});
 
 // Chuyển chữ có dấu tiếng Việt thành không dấu (Điện -> Dien, áp -> ap...) trước khi
 // sanitize, tránh việc sanitizeTbKey biến toàn bộ ký tự có dấu thành "_" làm mất

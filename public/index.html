@@ -9,7 +9,7 @@
 <body>
   <header class="topbar">
     <h1>KEPServerEX Tag Manager</h1>
-    <div class="topbar-actions">
+    <div class="topbar-actions" id="topbarActions">
       <label class="btn">
         Import JSON
         <input type="file" id="importFile" accept=".json" hidden />
@@ -161,6 +161,30 @@
         </table>
       </div>
       <div id="tbDevicePagination" class="pagination"></div>
+
+      <div id="userTableWrap" class="table-wrap" style="display:none">
+        <table id="userTable">
+          <colgroup>
+            <col style="width:60px" />
+            <col style="width:auto" />
+            <col style="width:120px" />
+            <col style="width:auto" />
+            <col style="width:auto" />
+            <col style="width:90px" />
+          </colgroup>
+          <thead>
+          <tr>
+            <th>ID</th>
+            <th>Tên đăng nhập</th>
+            <th>Quyền</th>
+            <th>Tạo lúc</th>
+            <th>Cập nhật</th>
+            <th>Thao tác</th>
+          </tr>
+          </thead>
+          <tbody id="userTableBody"></tbody>
+        </table>
+      </div>
 
       <div id="emptyState" class="empty-state">
         <p>Chọn 1 device ở cây bên trái, hoặc bấm <b>Import JSON</b> để bắt đầu.</p>

@@ -187,4 +187,24 @@ ensureColumn('devices', 'default_tb_device_id', 'INTEGER');
   }
 })();
 
+// ---------- USERS ----------
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'viewer',
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )
+`);
+
+// Seed default admin if no users exist
+const bcrypt = require('bcrypt');
+const userCount = db.prepare('SELECT COUNT(*) c FROM users').get().c;
+if (userCount === 0) {
+  const hash = bcrypt.hashSync('admin123', 10);
+  db.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)').run('admin', hash, 'admin');
+}
+
 module.exports = db;

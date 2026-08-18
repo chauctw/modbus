@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8" />
+<title>Đăng nhập - KEPServerEX Tag Manager</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/style.css" />
+<style>
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  padding: 24px;
+}
+.login-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 32px;
+  width: 100%;
+  max-width: 380px;
+  box-shadow: var(--shadow-md);
+}
+.login-card h2 {
+  margin: 0 0 24px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+  text-align: center;
+}
+.login-card .field {
+  margin-bottom: 16px;
+}
+.login-card .field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.login-card .field input {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius);
+  font-size: 14px;
+  font-family: var(--font-body);
+  transition: all 0.2s;
+}
+.login-card .field input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(48, 86, 128, 0.1);
+}
+.login-card .btn-primary {
+  width: 100%;
+  padding: 10px;
+  margin-top: 8px;
+  font-size: 14px;
+}
+.login-error {
+  color: var(--danger);
+  font-size: 13px;
+  margin-top: 12px;
+  text-align: center;
+  min-height: 20px;
+}
+.login-hint {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: center;
+  margin-top: 16px;
+}
+</style>
+</head>
+<body>
+  <div class="login-page">
+    <div class="login-card">
+      <h2>Đăng nhập hệ thống</h2>
+      <div class="field">
+        <label>Tên đăng nhập</label>
+        <input type="text" id="username" placeholder="admin" autocomplete="username" />
+      </div>
+      <div class="field">
+        <label>Mật khẩu</label>
+        <input type="password" id="password" placeholder="••••••" autocomplete="current-password" />
+      </div>
+      <button class="btn btn-primary" id="loginBtn">Đăng nhập</button>
+      <div class="login-error" id="loginError"></div>
+      <div class="login-hint">Tài khoản mặc định: <b>admin</b> / <b>admin123</b></div>
+    </div>
+  </div>
+
+  <script>
+    const API = '';
+    const $ = (sel) => document.querySelector(sel);
+    async function api(path, opts = {}) {
+      const res = await fetch(API + path, {
+        headers: opts.body && !(opts.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {},
+        ...opts,
+      });
+      const isJson = res.headers.get('content-type')?.includes('application/json');
+      const data = isJson ? await res.json() : await res.text();
+      if (!res.ok) throw new Error((data && data.error) || 'Lỗi không xác định');
+      return data;
+    }
+
+    $('#loginBtn').addEventListener('click', async () => {
+      const username = $('#username').value.trim();
+      const password = $('#password').value;
+      const errEl = $('#loginError');
+      errEl.textContent = '';
+      if (!username || !password) {
+        errEl.textContent = 'Vui lòng nhập đầy đủ username và password';
+        return;
+      }
+      try {
+        const data = await api('/api/auth/login', {
+          method: 'POST',
+          body: JSON.stringify({ username, password }),
+        });
+        localStorage.setItem('kmt_token', data.token);
+        localStorage.setItem('kmt_user', JSON.stringify(data.user));
+        window.location.href = '/';
+      } catch (e) {
+        errEl.textContent = e.message;
+      }
+    });
+
+    $('#password').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') $('#loginBtn').click();
+    });
+
+    (async function init() {
+      const token = localStorage.getItem('kmt_token');
+      if (token) {
+        try {
+          const data = await api('/api/auth/me', {
+            headers: { Authorization: 'Bearer ' + token },
+          });
+          if (data.user) {
+            localStorage.setItem('kmt_user', JSON.stringify(data.user));
+            window.location.href = '/';
+            return;
+          }
+        } catch (e) {
+          localStorage.removeItem('kmt_token');
+          localStorage.removeItem('kmt_user');
+        }
+      }
+    })();
+  </script>
+</body>
+</html>
