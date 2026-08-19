@@ -104,6 +104,35 @@ CREATE INDEX IF NOT EXISTS idx_tags_device ON tags(device_id);
 CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name);
 CREATE INDEX IF NOT EXISTS idx_tags_address ON tags(address);
 CREATE INDEX IF NOT EXISTS idx_api_tb_mappings_key ON api_tb_mappings(api_key);
+
+CREATE TABLE IF NOT EXISTS custom_tags (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  expression TEXT NOT NULL,
+  decimals INTEGER DEFAULT 2,
+  realtime_enabled INTEGER DEFAULT 0,
+  tb_telemetry_enabled INTEGER DEFAULT 0,
+  tb_telemetry_interval_ms INTEGER DEFAULT 5000,
+  tb_attributes_enabled INTEGER DEFAULT 0,
+  tb_attributes_interval_ms INTEGER DEFAULT 5000,
+  sort_order INTEGER DEFAULT 0,
+  raw_json TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS custom_tag_sources (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  custom_tag_id INTEGER NOT NULL REFERENCES custom_tags(id) ON DELETE CASCADE,
+  source_type TEXT NOT NULL CHECK(source_type IN ('tag','api_key')),
+  source_tag_id INTEGER REFERENCES tags(id) ON DELETE SET NULL,
+  source_api_key TEXT,
+  sort_order INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS custom_tag_tb_devices (
+  custom_tag_id INTEGER NOT NULL REFERENCES custom_tags(id) ON DELETE CASCADE,
+  tb_device_id INTEGER NOT NULL REFERENCES thingsboard_devices(id) ON DELETE CASCADE,
+  PRIMARY KEY (custom_tag_id, tb_device_id)
+);
 `);
 
 // ---- Migration an toàn cho DB đã tồn tại từ bản trước (thêm cột nếu chưa có) ----
@@ -184,6 +213,42 @@ ensureColumn('devices', 'default_tb_device_id', 'INTEGER');
     ins.run('clean_water', 'Nước Sạch', 10000);
     ins.run('raw_water', 'Nước Thô', 10000);
     ins.run('viwater', 'Viwater', 10000);
+  }
+})();
+
+// Migration: bảng custom tag (an toàn cho DB cũ)
+(function migrateCustomTags() {
+  db.exec(`CREATE TABLE IF NOT EXISTS custom_tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    expression TEXT NOT NULL,
+    decimals INTEGER DEFAULT 2,
+    realtime_enabled INTEGER DEFAULT 0,
+    tb_telemetry_enabled INTEGER DEFAULT 0,
+    tb_telemetry_interval_ms INTEGER DEFAULT 5000,
+    tb_attributes_enabled INTEGER DEFAULT 0,
+    tb_attributes_interval_ms INTEGER DEFAULT 5000,
+    sort_order INTEGER DEFAULT 0,
+    raw_json TEXT NOT NULL DEFAULT '{}'
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS custom_tag_sources (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    custom_tag_id INTEGER NOT NULL REFERENCES custom_tags(id) ON DELETE CASCADE,
+    source_type TEXT NOT NULL CHECK(source_type IN ('tag','api_key','custom_tag')),
+    source_tag_id INTEGER REFERENCES tags(id) ON DELETE SET NULL,
+    source_api_key TEXT,
+    source_custom_tag_id INTEGER REFERENCES custom_tags(id) ON DELETE SET NULL,
+    sort_order INTEGER DEFAULT 0
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS custom_tag_tb_devices (
+    custom_tag_id INTEGER NOT NULL REFERENCES custom_tags(id) ON DELETE CASCADE,
+    tb_device_id INTEGER NOT NULL REFERENCES thingsboard_devices(id) ON DELETE CASCADE,
+    PRIMARY KEY (custom_tag_id, tb_device_id)
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_custom_tag_sources_ct ON custom_tag_sources(custom_tag_id)');
+  const srcCols = db.prepare("PRAGMA table_info(custom_tag_sources)").all().map(c => c.name);
+  if (!srcCols.includes('source_custom_tag_id')) {
+    db.exec('ALTER TABLE custom_tag_sources ADD COLUMN source_custom_tag_id INTEGER REFERENCES custom_tags(id) ON DELETE SET NULL');
   }
 })();
 

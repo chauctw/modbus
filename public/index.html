@@ -10,7 +10,17 @@
   <header class="topbar">
     <h1>KEPServerEX Tag Manager</h1>
     <div class="topbar-actions" id="topbarActions">
-      <div class="dropdown" id="actionsDropdown">
+      <div class="dropdown" id="userDropdown">
+       <button class="btn dropdown-toggle" id="userDropdownToggle" type="button"> ▾</button>
+       <div class="dropdown-menu" id="userDropdownMenu">
+         <span class="dropdown-item user-info-display muted"></span>
+         <div class="dropdown-divider"></div>
+         <button class="dropdown-item user-mgmt-item" type="button">Quản lý người dùng</button>
+         <button class="dropdown-item change-pw-item" type="button">Đổi mật khẩu</button>
+         <button class="dropdown-item logout-item" type="button">Đăng xuất</button>
+       </div>
+     </div>
+     <div class="dropdown" id="actionsDropdown">
         <button class="btn dropdown-toggle" id="dropdownToggle" type="button">Thao tác ▾</button>
         <div class="dropdown-menu" id="dropdownMenu">
           <label class="dropdown-item">
@@ -59,6 +69,11 @@
         <span id="tagCountLabel" class="muted"></span>
       </div>
 
+      <div id="customTagToolbar" class="tag-toolbar" style="display:none">
+        <button class="btn" id="addCustomTagBtn">+ Custom Tag</button>
+        <span id="customTagCountLabel" class="muted"></span>
+      </div>
+
       <div id="tagTableWrap" class="table-wrap">
         <table id="tagTable" style="display:none">
           <colgroup>
@@ -97,6 +112,32 @@
         </table>
       </div>
       <div id="tagPagination" class="pagination"></div>
+
+      <div id="customTagTableWrap" class="table-wrap" style="display:none">
+        <table id="customTagTable">
+          <colgroup>
+            <col style="width:40px" />
+            <col style="width:auto" />
+            <col style="width:140px" />
+            <col style="width:80px" />
+            <col style="width:80px" />
+            <col style="width:auto" />
+            <col style="width:80px" />
+          </colgroup>
+          <thead>
+          <tr>
+            <th>STT</th>
+            <th>Tên tag</th>
+            <th>Giá trị</th>
+            <th>Attributes</th>
+            <th>Telemetry</th>
+            <th>Thiết bị TB</th>
+            <th>Thao tác</th>
+          </tr>
+          </thead>
+          <tbody id="customTagTableBody"></tbody>
+        </table>
+      </div>
 
       <div id="liveFetchConfigBar" style="display:none" class="live-fetch-config-bar">
         <h2 id="liveFetchTitle">Channel API Fetch</h2>

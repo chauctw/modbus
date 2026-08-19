@@ -654,6 +654,12 @@ td input:focus, td select:focus {
   margin-right: 8px;
 }
 
+.user-info-display {
+  cursor: default;
+  pointer-events: none;
+  color: var(--muted);
+}
+
 .topbar-actions .btn-small {
   padding: 4px 10px;
   font-size: 12px;
