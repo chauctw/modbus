@@ -61,7 +61,8 @@ body {
   border-bottom: 1px solid var(--border);
   box-shadow: var(--shadow-sm);
   position: relative;
-  z-index: 10;
+  z-index: 9999;
+  overflow: visible;
 }
 .topbar h1 {
   font-size: 16px;
@@ -80,6 +81,43 @@ body {
   background: var(--accent);
 }
 .topbar-actions { display: flex; gap: 10px; align-items: center; }
+.dropdown { position: relative; display: inline-flex; align-items: center; }
+.dropdown-toggle { }
+.dropdown-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-md);
+  min-width: 220px;
+  z-index: 100;
+  padding: 4px 0;
+}
+.dropdown-menu.show { display: block; }
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  padding: 8px 16px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 13px;
+  font-family: var(--font-body);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s;
+  gap: 8px;
+}
+.dropdown-item:hover { background: var(--panel-2); color: var(--accent); }
+.dropdown-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 12px;
+}
 
 /* ---------------------------------------------------------------------- */
 /* Buttons                                                                */

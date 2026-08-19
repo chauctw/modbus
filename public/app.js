@@ -182,6 +182,10 @@ $('#addUserBtn').addEventListener('click', () => openUserForm());
 
 function showUserManagement() {
   userManagementVisible = true;
+  state.currentChannelId = '__users__';
+  state.currentDeviceId = null;
+  currentLiveSource = null;
+  expandedChannels.clear();
   $('#emptyState').style.display = 'none';
   $('#deviceHeader').style.display = 'none';
   $('#userHeader').style.display = 'flex';
@@ -258,26 +262,6 @@ function renderTree() {
   const treeEl = $('#tree');
   treeEl.innerHTML = '';
 
-  if (isAdmin()) {
-    const userSection = document.createElement('div');
-    userSection.className = 'tree-channel';
-    userSection.innerHTML = `
-      <div class="tree-channel-row" data-channel="__users__">
-        <span class="tree-channel-name">QUẢN LÝ NGƯỜI DÙNG</span>
-      </div>
-    `;
-    userSection.querySelector('.tree-channel-name').addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (state.currentChannelId === '__users__') return;
-      state.currentChannelId = '__users__';
-      state.currentDeviceId = null;
-      currentLiveSource = null;
-      expandedChannels.clear();
-      showUserManagement();
-    });
-    treeEl.appendChild(userSection);
-  }
-
   // =========================================================
   // 1. THINGSBOARD SECTION (Đưa lên đầu tiên)
   // =========================================================
@@ -304,6 +288,8 @@ function renderTree() {
     expandedChannels.clear();
     $('#emptyState').style.display = 'none';
     $('#deviceHeader').style.display = 'none';
+    $('#userHeader').style.display = 'none';
+    $('#userTableWrap').style.display = 'none';
     $('#tagToolbar').style.display = 'none';
     $('#tagTableWrap').style.display = 'none';
     $('#tagPagination').style.display = 'none';
@@ -1625,6 +1611,21 @@ $('#liveFetchTableBody').addEventListener('click', (e) => {
   // Render dữ liệu bảng và làm đậm menu sidebar
   renderTbDeviceList(state.tbDevices);
   renderTree();
+
+  const dropdownToggle = $('#dropdownToggle');
+  const dropdownMenu = $('#dropdownMenu');
+  if (dropdownToggle && dropdownMenu) {
+    dropdownToggle.addEventListener('click', (e) => {
+      e.stopPropagation();
+      dropdownMenu.classList.toggle('show');
+    });
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#actionsDropdown')) {
+        dropdownMenu.classList.remove('show');
+      }
+    });
+  }
+
   setupTopbarAuth();
 })();
 
@@ -1632,20 +1633,30 @@ function setupTopbarAuth() {
   const user = getCurrentUser();
   if (!user) return;
   const topbar = $('.topbar-actions');
+  const dropdown = $('#actionsDropdown');
+
+  if (isAdmin()) {
+    const mgmtBtn = document.createElement('button');
+    mgmtBtn.className = 'btn btn-small';
+    mgmtBtn.textContent = 'Quản lý người dùng';
+    mgmtBtn.addEventListener('click', showUserManagement);
+    topbar.insertBefore(mgmtBtn, dropdown || topbar.firstChild);
+  }
+
   const info = document.createElement('span');
   info.className = 'user-info muted';
   info.textContent = `${user.username} (${user.role})`;
-  topbar.insertBefore(info, topbar.firstChild);
+  topbar.insertBefore(info, dropdown || topbar.firstChild);
 
   const changePwBtn = document.createElement('button');
   changePwBtn.className = 'btn btn-small';
   changePwBtn.textContent = 'Đổi mật khẩu';
   changePwBtn.addEventListener('click', openChangePasswordModal);
-  topbar.insertBefore(changePwBtn, topbar.firstChild.nextSibling);
+  topbar.insertBefore(changePwBtn, dropdown || topbar.firstChild);
 
   const logoutBtn = document.createElement('button');
   logoutBtn.className = 'btn btn-small btn-danger';
   logoutBtn.textContent = 'Đăng xuất';
   logoutBtn.addEventListener('click', logout);
-  topbar.insertBefore(logoutBtn, changePwBtn.nextSibling);
+  topbar.insertBefore(logoutBtn, dropdown || topbar.firstChild);
 }

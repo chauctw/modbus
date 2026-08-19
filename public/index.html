@@ -10,14 +10,20 @@
   <header class="topbar">
     <h1>KEPServerEX Tag Manager</h1>
     <div class="topbar-actions" id="topbarActions">
-      <label class="btn">
-        Import JSON
-        <input type="file" id="importFile" accept=".json" hidden />
-      </label>
-      <button class="btn" id="exportBtn">Export JSON</button>
-      <button class="btn btn-danger" id="resetBtn">Reset</button>
-      <button class="btn" id="addChannelBtn">+ Channel</button>
-      <button class="btn" id="addTbBtn">+ Thiết bị TB</button>
+      <div class="dropdown" id="actionsDropdown">
+        <button class="btn dropdown-toggle" id="dropdownToggle" type="button">Thao tác ▾</button>
+        <div class="dropdown-menu" id="dropdownMenu">
+          <label class="dropdown-item">
+            Import JSON
+            <input type="file" id="importFile" accept=".json" hidden />
+          </label>
+          <button class="dropdown-item" id="exportBtn" type="button">Export JSON</button>
+          <button class="dropdown-item" id="resetBtn" type="button">Reset</button>
+          <div class="dropdown-divider"></div>
+          <button class="dropdown-item" id="addChannelBtn" type="button">+ Channel</button>
+          <button class="dropdown-item" id="addTbBtn" type="button">+ Thiết bị TB</button>
+        </div>
+      </div>
     </div>
   </header>
 
