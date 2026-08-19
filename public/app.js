@@ -178,10 +178,13 @@ function openUserForm(user = null) {
   };
 }
 
+$('#addUserBtn').addEventListener('click', () => openUserForm());
+
 function showUserManagement() {
   userManagementVisible = true;
   $('#emptyState').style.display = 'none';
   $('#deviceHeader').style.display = 'none';
+  $('#userHeader').style.display = 'flex';
   $('#tagToolbar').style.display = 'none';
   $('#tagTableWrap').style.display = 'none';
   $('#tagPagination').style.display = 'none';
@@ -194,25 +197,6 @@ function showUserManagement() {
   $('#userTitle').textContent = 'Quản lý người dùng';
   $('#userMeta').textContent = `Đăng nhập: ${escapeHtml(getCurrentUser()?.username || '')} (${getCurrentUser()?.role || ''})`;
   loadUsers();
-  renderTree();
-}
-
-function showEmptyState() {
-  userManagementVisible = false;
-  $('#userTableWrap').style.display = 'none';
-  $('#emptyState').style.display = 'block';
-  $('#deviceHeader').style.display = 'none';
-  $('#tagToolbar').style.display = 'none';
-  $('#tagTableWrap').style.display = 'none';
-  $('#tagPagination').style.display = 'none';
-  $('#liveFetchConfigBar').style.display = 'none';
-  $('#liveFetchTableWrap').style.display = 'none';
-  $('#liveFetchPagination').style.display = 'none';
-  $('#tbDeviceTableWrap').style.display = 'none';
-  $('#tbDevicePagination').style.display = 'none';
-  expandedChannels.clear();
-  state.currentChannelId = null;
-  state.currentDeviceId = null;
   renderTree();
 }
 
@@ -479,7 +463,7 @@ function openChannelMenu(ch) {
     </div>
     <div id="err" class="error-text"></div>
     <div class="modal-actions">
-      <button class="btn btn-danger" id="delCh">Xoá channel (${ch.deviceCount} device, ${ch.tagCount} tag)</button>
+      <button class="btn btn-danger" id="delCh">Xoá</button>
       <button class="btn" onclick="closeModal()">Đóng</button>
       <button class="btn btn-primary" id="saveCh">Lưu</button>
     </div>
@@ -548,6 +532,7 @@ async function selectDevice(channelId, deviceId) {
   const dev = await api(`/api/devices/${deviceId}`);
   realtimePollMs = Number(dev.scan_rate_ms) > 0 ? Number(dev.scan_rate_ms) : 2000;
   $('#emptyState').style.display = 'none';
+  $('#userHeader').style.display = 'none';
   $('#userTableWrap').style.display = 'none';
   $('#deviceHeader').style.display = 'flex';
   $('#tagToolbar').style.display = 'flex';
@@ -584,6 +569,7 @@ function showEmptyState() {
   currentLiveSource = null;
   userManagementVisible = false;
   $('#emptyState').style.display = 'block';
+  $('#userHeader').style.display = 'none';
   $('#userTableWrap').style.display = 'none';
   $('#deviceHeader').style.display = 'none';
   $('#tagToolbar').style.display = 'none';
@@ -613,6 +599,7 @@ async function selectTbDevice(tb) {
   renderTree();
   await loadTbDevices();
   $('#emptyState').style.display = 'none';
+  $('#userHeader').style.display = 'none';
   $('#userTableWrap').style.display = 'none';
   $('#deviceHeader').style.display = 'flex';
   $('#tagToolbar').style.display = 'none';
@@ -1284,7 +1271,32 @@ $('#importFile').addEventListener('change', async (e) => {
   e.target.value = '';
 });
 
-$('#exportBtn').addEventListener('click', () => { window.location.href = '/api/export'; });
+$('#exportBtn').addEventListener('click', async () => {
+  try {
+    const token = localStorage.getItem('kmt_token');
+    const res = await fetch('/api/export', {
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+    if (res.status === 401) {
+      localStorage.removeItem('kmt_token');
+      localStorage.removeItem('kmt_user');
+      window.location.href = '/login.html';
+      return;
+    }
+    if (!res.ok) throw new Error('Export failed');
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'kepware-export.json';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert('Export lỗi: ' + err.message);
+  }
+});
 
 $('#resetBtn').addEventListener('click', async () => {
   if (!confirm('Xoá toàn bộ dữ liệu hiện tại trong DB? Hành động này không thể hoàn tác.')) return;
@@ -1513,6 +1525,7 @@ async function selectLiveSource(key) {
   expandedChannels.clear();
   expandedChannels.add('__api__');
   $('#emptyState').style.display = 'none';
+  $('#userHeader').style.display = 'none';
   $('#userTableWrap').style.display = 'none';
   $('#deviceHeader').style.display = 'none';
   $('#tagToolbar').style.display = 'none';

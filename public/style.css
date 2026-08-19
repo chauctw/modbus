@@ -496,14 +496,14 @@ td input:focus, td select:focus {
 
 
 /* Ẩn mục QUẢN LÝ NGƯỜI DÙNG trên Sidebar */
-.tree-channel:has([data-channel="__users__"]) {
+/* .tree-channel:has([data-channel="__users__"]) {
   display: none !important;
-}
+} */
 
 /* Đề phòng trường hợp thẻ nằm độc lập không có class .tree-channel bọc ngoài */
-[data-channel="__users__"] {
+/* [data-channel="__users__"] {
   display: none !important;
-}
+} */
 /* ---------------------------------------------------------------------- */
 /* Modal                                                                  */
 /* ---------------------------------------------------------------------- */
