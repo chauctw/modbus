@@ -50,10 +50,10 @@ function renderUserList(users) {
       <td><span class="badge ${u.role === 'admin' ? 'on' : ''}">${u.role}</span></td>
       <td class="muted">${u.created_at || '-'}</td>
       <td class="muted">${u.updated_at || '-'}</td>
-      <td class="row-actions">
+      <td><div class="row-actions">
         <button class="icon-btn edit-btn" title="Sửa quyền">⚙</button>
         <button class="icon-btn del-btn" title="Xoá">🗑</button>
-      </td>
+      </div></td>
     `;
     tbody.appendChild(tr);
     tr.querySelector('.edit-btn').addEventListener('click', () => openUserForm(u));

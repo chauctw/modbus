@@ -23,11 +23,11 @@ function renderTbDeviceList(tbDevices) {
       <td class="muted">${tb.telemetry_interval_ms}</td>
       <td class="muted">${tb.attributes_interval_ms}</td>
       <td class="muted">${tb.request_timeout_ms}</td>
-      <td>${tb.enabled ? '<span class="badge on">Bật</span>' : '<span class="badge off">Tắt</span>'}</td>
-      <td class="row-actions">
+      <td><button class="rt-toggle ${tb.enabled ? 'on' : 'off'}" data-tb-enabled-id="${tb.id}">${tb.enabled ? 'ON' : 'OFF'}</button></td>
+      <td><div class="row-actions">
         <button class="icon-btn edit-btn" title="Sửa">⚙</button>
         <button class="icon-btn del-btn" title="Xoá">🗑</button>
-      </td>
+      </div></td>
     `;
     tbody.appendChild(tr);
     tr.querySelector('.edit-btn').addEventListener('click', () => openTbDeviceForm(tb));
@@ -35,10 +35,31 @@ function renderTbDeviceList(tbDevices) {
       if (!confirm(`Xoá thiết bị ThingsBoard "${tb.name}"?`)) return;
       await api(`/api/thingsboard-devices/${tb.id}`, { method: 'DELETE' });
       await loadTbDevices();
+      renderTree();
       if (state.currentDeviceId === `tb-${tb.id}`) {
         showEmptyState();
-      } else if (state.currentDeviceId && String(state.currentDeviceId).startsWith('tb-')) {
+      } else if (state.currentChannelId === '__tb__' || (state.currentDeviceId && String(state.currentDeviceId).startsWith('tb-'))) {
         renderTbDeviceList(state.tbDevices);
+      }
+    });
+    tr.querySelector('[data-tb-enabled-id]').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const isOn = btn.classList.contains('on');
+      const newState = isOn ? 0 : 1;
+      try {
+        await api(`/api/thingsboard-devices/${tb.id}`, { method: 'PUT', body: JSON.stringify({ enabled: newState }) });
+        await loadTbDevices();
+        renderTree();
+        if (state.currentChannelId === '__tb__' || (state.currentDeviceId && String(state.currentDeviceId).startsWith('tb-'))) {
+          renderTbDeviceList(state.tbDevices);
+        }
+      } catch (err) {
+        alert(err.message);
+        await loadTbDevices();
+        renderTree();
+        if (state.currentChannelId === '__tb__' || (state.currentDeviceId && String(state.currentDeviceId).startsWith('tb-'))) {
+          renderTbDeviceList(state.tbDevices);
+        }
       }
     });
   });
@@ -90,7 +111,8 @@ function openTbDeviceForm(tb = null) {
       if (isEdit) await api(`/api/thingsboard-devices/${tb.id}`, { method: 'PUT', body: JSON.stringify(body) });
       else await api('/api/thingsboard-devices', { method: 'POST', body: JSON.stringify(body) });
       closeModal(); await loadTbDevices();
-      if (state.currentDeviceId && String(state.currentDeviceId).startsWith('tb-')) {
+      renderTree();
+      if (state.currentChannelId === '__tb__' || (state.currentDeviceId && String(state.currentDeviceId).startsWith('tb-'))) {
         renderTbDeviceList(state.tbDevices);
       }
     } catch (e) { $('#err').textContent = e.message; }
@@ -112,6 +134,7 @@ async function selectDevice(channelId, deviceId) {
   currentLiveSource = null;
   renderTree();
   await loadTbDevices();
+  renderTree();
   const dev = await api(`/api/devices/${deviceId}`);
   realtimePollMs = Number(dev.scan_rate_ms) > 0 ? Number(dev.scan_rate_ms) : 2000;
   $('#emptyState').style.display = 'none';

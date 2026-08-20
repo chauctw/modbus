@@ -1,3 +1,20 @@
+function setLiveCell(id, res) {
+  const tr = document.querySelector(`#tagTableBody tr[data-id="${id}"]`);
+  if (!tr) return;
+  const dot = tr.querySelector('.live-dot');
+  const text = tr.querySelector('.live-text');
+  if (!dot || !text) return;
+  if (res.value === null || res.value === undefined || res.quality === 'bad') {
+    dot.className = 'live-dot bad';
+    text.className = 'live-text muted';
+    text.textContent = '—';
+  } else {
+    dot.className = 'live-dot good';
+    text.className = 'live-text';
+    text.textContent = formatNum(res.value);
+  }
+}
+
 async function pollLiveValues() {
   if (!state.realtimeEnabled || !state.currentDeviceId) return;
   const rows = document.querySelectorAll('#tagTableBody tr');

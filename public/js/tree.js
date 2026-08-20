@@ -24,6 +24,8 @@ function renderTree() {
     state.currentChannelId = '__tb__';
     state.currentDeviceId = null;
     currentLiveSource = null;
+    stopRealtime();
+    stopCustomTagRealtime();
     expandedChannels.clear();
     $('#emptyState').style.display = 'none';
     $('#deviceHeader').style.display = 'none';
@@ -35,6 +37,8 @@ function renderTree() {
     $('#liveFetchConfigBar').style.display = 'none';
     $('#liveFetchTableWrap').style.display = 'none';
     $('#liveFetchPagination').style.display = 'none';
+    $('#customTagToolbar').style.display = 'none';
+    $('#customTagTableWrap').style.display = 'none';
     $('#tbDeviceTableWrap').style.display = 'block';
     $('#tbDevicePagination').style.display = 'none';
     renderTbDeviceList(state.tbDevices);

@@ -364,21 +364,32 @@ const { compile } = require('./expression-engine');
 async function evaluateCustomTags() {
   try {
     const tags = db.prepare('SELECT * FROM custom_tags WHERE realtime_enabled=1 OR tb_telemetry_enabled=1 OR tb_attributes_enabled=1').all();
+    const tagInfo = db.prepare(`
+      SELECT t.id, t.name as tag_name, t.device_id,
+             d.name as device_name, d.channel_id,
+             c.name as channel_name
+      FROM tags t
+      JOIN devices d ON t.device_id = d.id
+      JOIN channels c ON d.channel_id = c.id
+    `).all();
+    const tagInfoMap = new Map(tagInfo.map(t => [t.id, t]));
+    const customTagNames = new Map();
+    db.prepare('SELECT id, name FROM custom_tags').all().forEach(ct => customTagNames.set(ct.id, ct.name));
     for (const ct of tags) {
       const sources = db.prepare('SELECT * FROM custom_tag_sources WHERE custom_tag_id=? ORDER BY sort_order, id').all(ct.id);
       const ctx = {};
       sources.forEach((src) => {
         let refName = null;
         if (src.source_type === 'tag' && src.source_tag_id != null) {
-          const tagRow = db.prepare('SELECT name FROM tags WHERE id=?').get(src.source_tag_id);
-          refName = tagRow ? tagRow.name : `tag_${src.source_tag_id}`;
+          const info = tagInfoMap.get(src.source_tag_id);
+          refName = info ? `${info.channel_name}.${info.device_name}.${info.tag_name}` : `tag_${src.source_tag_id}`;
           ctx[refName] = tagValueCache.get(`tag:${src.source_tag_id}`);
         } else if (src.source_type === 'api_key' && src.source_api_key) {
           refName = src.source_api_key;
           ctx[refName] = tagValueCache.get(`api:${src.source_api_key}`);
         } else if (src.source_type === 'custom_tag' && src.source_custom_tag_id != null) {
-          const ctagRow = db.prepare('SELECT name FROM custom_tags WHERE id=?').get(src.source_custom_tag_id);
-          refName = ctagRow ? ctagRow.name : `custom_${src.source_custom_tag_id}`;
+          const cname = customTagNames.get(src.source_custom_tag_id);
+          refName = cname || `custom_${src.source_custom_tag_id}`;
           ctx[refName] = customTagValueCache.get(src.source_custom_tag_id);
         }
       });

@@ -20,16 +20,14 @@ function renderCustomTagTable(tags) {
       <td><button class="rt-toggle ${tbAttributesClass}" data-ct-attributes-id="${ct.id}">${ct.tb_attributes_enabled ? 'ON' : 'OFF'}</button></td>
       <td><button class="rt-toggle ${tbTelemetryClass}" data-ct-telemetry-id="${ct.id}">${ct.tb_telemetry_enabled ? 'ON' : 'OFF'}</button></td>
       <td class="cell-tb-devices" data-ct-id="${ct.id}" style="cursor:pointer;color:var(--accent)" title="Thiết bị TB">—</td>
-      <td class="row-actions">
+      <td><div class="row-actions">
         <button class="icon-btn edit-btn" title="Sửa">⚙</button>
         <button class="icon-btn del-btn" title="Xoá">🗑</button>
-      </td>
+      </div></td>
     `;
     tbody.appendChild(tr);
-    autoSizeCellInput(tr.querySelector('.cell-name'));
 
     tr.querySelector('.cell-name').addEventListener('change', () => saveCustomTagInlineEdit(ct.id, tr));
-    tr.querySelector('.cell-name').addEventListener('input', (e) => autoSizeCellInput(e.target));
 
     tr.querySelector('[data-ct-telemetry-id]').addEventListener('click', async (e) => {
       const btn = e.currentTarget;
@@ -96,7 +94,7 @@ async function openCustomTagForm(ct = null) {
           <button class="btn" id="insCustom" type="button" title="Chèn CustomTag khác">+ CustomTag</button>
         </div>
       </div>
-      <p class="muted">Ví dụ: <code>tagA + tagB * 2</code> hoặc <code>@flow_rate / 1000</code>. Dùng <code>abs()</code>, <code>round()</code>, <code>min()</code>, <code>max()</code>.</p>
+      <p class="muted">Ví dụ: <code>tagA + tagB * 2</code> hoặc <code>flow_rate / 1000</code>. Dùng <code>abs()</code>, <code>round()</code>, <code>min()</code>, <code>max()</code>.</p>
     </div>
     <div class="field"><label>Decimals</label><input id="f-decimals" type="number" value="${ct ? ct.decimals : 2}" /></div>
     <div class="checkbox-inline"><input type="checkbox" id="f-tb-telemetry" ${ct && ct.tb_telemetry_enabled ? 'checked' : ''} /> <label for="f-tb-telemetry">Telemetry</label></div>
@@ -131,7 +129,7 @@ async function openCustomTagForm(ct = null) {
   $('#insApi').onclick = async () => {
     const available = await api('/api/custom-tags/sources/available');
     const pick = prompt('Chọn API key (dán tên):\n' + available.apiKeys.join('\n'));
-    if (pick) insertAtCursor('@' + pick.trim());
+    if (pick) insertAtCursor(pick.trim());
   };
   $('#insCustom').onclick = async () => {
     const available = await api('/api/custom-tags/sources/available');

@@ -4,23 +4,6 @@ async function getDataTypes() {
   return dataTypesCache;
 }
 
-let _measureCanvas = null;
-function measureTextWidth(text, font) {
-  if (!_measureCanvas) _measureCanvas = document.createElement('canvas');
-  const ctx = _measureCanvas.getContext('2d');
-  ctx.font = font;
-  return ctx.measureText(text || '').width;
-}
-function autoSizeCellInput(el) {
-  if (!el) return;
-  const style = getComputedStyle(el);
-  const font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-  const textWidth = measureTextWidth(el.value, font);
-  const paddingBorder = 4 + 4 + 2 + 2;
-  el.style.width = Math.max(40, Math.ceil(textWidth) + paddingBorder + 8) + 'px';
-  el.title = el.value || '';
-}
-
 async function loadTags() {
   const dataTypes = await getDataTypes();
   const q = new URLSearchParams({
@@ -41,8 +24,9 @@ async function loadTags() {
   const tbody = $('#tagTableBody');
   tbody.innerHTML = '';
   rows.forEach((tag, idx) => {
-     const tr = document.createElement('tr');
-     tr.dataset.id = tag.id;
+      const tr = document.createElement('tr');
+      tr.dataset.id = tag.id;
+      if (state.selected.has(tag.id)) tr.classList.add('row-selected');
      const stt = idx + 1;
      const scalingLabel = tag.scaling_type ? 'Linear' : 'None';
      const rtClass = tag.realtime_enabled ? 'on' : 'off';
@@ -71,19 +55,18 @@ async function loadTags() {
        <td><button class="rt-toggle ${tbTelemetryClass}" data-tb-telemetry-id="${tag.id}">${tag.tb_telemetry_enabled ? 'ON' : 'OFF'}</button></td>
        <td><button class="rt-toggle ${tbAttributesClass}" data-tb-attributes-id="${tag.id}">${tag.tb_attributes_enabled ? 'ON' : 'OFF'}</button></td>
        <td class="cell-tb-devices" data-tag-id="${tag.id}" style="cursor:pointer;color:var(--accent)" title="${escapeHtml(tbNames)}">${escapeHtml(tbNames)}</td>
-       <td class="row-actions">
-         <button class="icon-btn edit-btn" title="Sửa chi tiết (scaling)">⚙</button>
-         <button class="icon-btn del-btn" title="Xoá">🗑</button>
-       </td>
+        <td><div class="row-actions">
+          <button class="icon-btn edit-btn" title="Sửa chi tiết (scaling)">⚙</button>
+          <button class="icon-btn del-btn" title="Xoá">🗑</button>
+        </div></td>
      `;
-    tbody.appendChild(tr);
-    autoSizeCellInput(tr.querySelector('.cell-name'));
-    autoSizeCellInput(tr.querySelector('.cell-address'));
+     tbody.appendChild(tr);
 
-    tr.querySelector('.row-check').addEventListener('change', (e) => {
-      if (e.target.checked) state.selected.add(tag.id); else state.selected.delete(tag.id);
-      updateBulkButtons();
-    });
+      tr.querySelector('.row-check').addEventListener('change', (e) => {
+       tr.classList.toggle('row-selected', e.target.checked);
+       if (e.target.checked) state.selected.add(tag.id); else state.selected.delete(tag.id);
+       updateBulkButtons();
+     });
     tr.querySelector('[data-tag-id]').addEventListener('click', async (e) => {
       const btn = e.currentTarget;
       const isOn = btn.classList.contains('on');
@@ -137,10 +120,6 @@ async function loadTags() {
       if (el) {
         el.addEventListener('change', () => saveInlineEdit(tag.id, tr));
       }
-    });
-    ['cell-name', 'cell-address'].forEach((cls) => {
-      const el = tr.querySelector('.' + cls);
-      if (el) el.addEventListener('input', () => autoSizeCellInput(el));
     });
   });
 
@@ -211,6 +190,7 @@ function updateBulkButtons() {
 $('#selectAllTags').addEventListener('change', (e) => {
   document.querySelectorAll('.row-check').forEach((cb) => {
     cb.checked = e.target.checked;
+    cb.closest('tr').classList.toggle('row-selected', e.target.checked);
     const id = Number(cb.closest('tr').dataset.id);
     if (e.target.checked) state.selected.add(id); else state.selected.delete(id);
   });

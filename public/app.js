@@ -166,15 +166,28 @@ window.addEventListener('beforeunload', () => {
     });
   }
 
-  $('#userMgmtItem').addEventListener('click', () => {
-    showUserManagement();
-  });
+  const userMgmtItem = $('.user-mgmt-item');
+  const changePwItem = $('.change-pw-item');
+  const logoutItem = $('.logout-item');
 
-  $('#changePwItem').addEventListener('click', () => {
-    openChangePasswordModal();
-  });
+  if (userMgmtItem) {
+    userMgmtItem.addEventListener('click', () => {
+      userDropdownMenu && userDropdownMenu.classList.remove('show');
+      showUserManagement();
+    });
+  }
 
-  $('#logoutItem').addEventListener('click', () => {
-    logout();
-  });
+  if (changePwItem) {
+    changePwItem.addEventListener('click', () => {
+      userDropdownMenu && userDropdownMenu.classList.remove('show');
+      openChangePasswordModal();
+    });
+  }
+
+  if (logoutItem) {
+    logoutItem.addEventListener('click', () => {
+      userDropdownMenu && userDropdownMenu.classList.remove('show');
+      logout();
+    });
+  }
 })();

@@ -231,25 +231,39 @@ ensureColumn('devices', 'default_tb_device_id', 'INTEGER');
     sort_order INTEGER DEFAULT 0,
     raw_json TEXT NOT NULL DEFAULT '{}'
   )`);
-  db.exec(`CREATE TABLE IF NOT EXISTS custom_tag_sources (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    custom_tag_id INTEGER NOT NULL REFERENCES custom_tags(id) ON DELETE CASCADE,
-    source_type TEXT NOT NULL CHECK(source_type IN ('tag','api_key','custom_tag')),
-    source_tag_id INTEGER REFERENCES tags(id) ON DELETE SET NULL,
-    source_api_key TEXT,
-    source_custom_tag_id INTEGER REFERENCES custom_tags(id) ON DELETE SET NULL,
-    sort_order INTEGER DEFAULT 0
-  )`);
+  // Đảm bảo bảng custom_tag_sources có CHECK(source_type IN ('tag','api_key','custom_tag'))
+  // vì SQLite không hỗ trợ ALTER TABLE để sửa CHECK constraint trên bảng đã tồn tại.
+  const ctSrcExists = db.prepare("SELECT COUNT(*) as c FROM sqlite_master WHERE type='table' AND name='custom_tag_sources'").get().c;
+  if (ctSrcExists) {
+    db.exec(`CREATE TABLE custom_tag_sources_new (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      custom_tag_id INTEGER NOT NULL REFERENCES custom_tags(id) ON DELETE CASCADE,
+      source_type TEXT NOT NULL CHECK(source_type IN ('tag','api_key','custom_tag')),
+      source_tag_id INTEGER REFERENCES tags(id) ON DELETE SET NULL,
+      source_api_key TEXT,
+      source_custom_tag_id INTEGER REFERENCES custom_tags(id) ON DELETE SET NULL,
+      sort_order INTEGER DEFAULT 0
+    )`);
+    db.exec(`INSERT INTO custom_tag_sources_new SELECT id, custom_tag_id, source_type, source_tag_id, source_api_key, source_custom_tag_id, sort_order FROM custom_tag_sources`);
+    db.exec('DROP TABLE custom_tag_sources');
+    db.exec('ALTER TABLE custom_tag_sources_new RENAME TO custom_tag_sources');
+  } else {
+    db.exec(`CREATE TABLE custom_tag_sources (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      custom_tag_id INTEGER NOT NULL REFERENCES custom_tags(id) ON DELETE CASCADE,
+      source_type TEXT NOT NULL CHECK(source_type IN ('tag','api_key','custom_tag')),
+      source_tag_id INTEGER REFERENCES tags(id) ON DELETE SET NULL,
+      source_api_key TEXT,
+      source_custom_tag_id INTEGER REFERENCES custom_tags(id) ON DELETE SET NULL,
+      sort_order INTEGER DEFAULT 0
+    )`);
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_custom_tag_sources_ct ON custom_tag_sources(custom_tag_id)');
   db.exec(`CREATE TABLE IF NOT EXISTS custom_tag_tb_devices (
     custom_tag_id INTEGER NOT NULL REFERENCES custom_tags(id) ON DELETE CASCADE,
     tb_device_id INTEGER NOT NULL REFERENCES thingsboard_devices(id) ON DELETE CASCADE,
     PRIMARY KEY (custom_tag_id, tb_device_id)
   )`);
-  db.exec('CREATE INDEX IF NOT EXISTS idx_custom_tag_sources_ct ON custom_tag_sources(custom_tag_id)');
-  const srcCols = db.prepare("PRAGMA table_info(custom_tag_sources)").all().map(c => c.name);
-  if (!srcCols.includes('source_custom_tag_id')) {
-    db.exec('ALTER TABLE custom_tag_sources ADD COLUMN source_custom_tag_id INTEGER REFERENCES custom_tags(id) ON DELETE SET NULL');
-  }
 })();
 
 // ---------- USERS ----------
