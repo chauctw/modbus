@@ -1,16 +1,9 @@
 const express = require('express');
-const multer = require('multer');
-const path = require('path');
 const cors = require('cors');
-const axios = require('axios');
-const bcrypt = require('bcrypt');
+const path = require('path');
 const jwt = require('jsonwebtoken');
 const db = require('./db');
-const { fetchCleanWaterLive, fetchRawWaterLive, fetchViwaterLive } = require('./live_fetchers');
 const { DATA_TYPES } = require('./datatypes');
-const { readTagsForDevice, closeConnection, closeAll } = require('./modbus-client');
-const { importProject, mergeProject, exportProject } = require('./kepware-io');
-const { compile } = require('./expression-engine');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -18,8 +11,6 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json({ limit: '200mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
-
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } });
 
 const JWT_SECRET = process.env.JWT_SECRET || 'kepware-tag-manager-secret-2026';
 
@@ -52,74 +43,6 @@ function requireRole(...roles) {
 
 app.use('/api', authenticate);
 
-app.post('/api/auth/login', (req, res) => {
-  const { username, password } = req.body;
-  if (!username || !password) return res.status(400).json({ error: 'Thiếu username hoặc password' });
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-  if (!user) return res.status(401).json({ error: 'Sai tên đăng nhập hoặc mật khẩu' });
-  if (!bcrypt.compareSync(password, user.password_hash)) return res.status(401).json({ error: 'Sai tên đăng nhập hoặc mật khẩu' });
-  const token = jwt.sign({ id: user.id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
-  res.json({ token, user: { id: user.id, username: user.username, role: user.role } });
-});
-
-app.get('/api/auth/me', (req, res) => {
-  if (!req.user) return res.status(401).json({ error: 'Chưa đăng nhập' });
-  res.json({ user: req.user });
-});
-
-app.post('/api/auth/change-password', (req, res) => {
-  if (!req.user) return res.status(401).json({ error: 'Chưa đăng nhập' });
-  const { oldPassword, newPassword } = req.body;
-  if (!oldPassword || !newPassword) return res.status(400).json({ error: 'Thiếu mật khẩu cũ hoặc mới' });
-  if (newPassword.length < 6) return res.status(400).json({ error: 'Mật khẩu mới phải có ít nhất 6 ký tự' });
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.user.id);
-  if (!user) return res.status(404).json({ error: 'Không tìm thấy người dùng' });
-  if (!bcrypt.compareSync(oldPassword, user.password_hash)) return res.status(400).json({ error: 'Mật khẩu cũ không đúng' });
-  const newHash = bcrypt.hashSync(newPassword, 10);
-  db.prepare("UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?").run(newHash, req.user.id);
-  res.json({ ok: true });
-});
-
-app.get('/api/users', requireRole('admin'), (req, res) => {
-  const users = db.prepare('SELECT id, username, role, created_at, updated_at FROM users ORDER BY id').all();
-  res.json(users);
-});
-
-app.post('/api/users', requireRole('admin'), (req, res) => {
-  const { username, password, role = 'viewer' } = req.body;
-  if (!username || !password) return res.status(400).json({ error: 'Thiếu username hoặc password' });
-  if (password.length < 6) return res.status(400).json({ error: 'Password phải có ít nhất 6 ký tự' });
-  if (!['admin', 'editor', 'viewer'].includes(role)) return res.status(400).json({ error: 'Role không hợp lệ' });
-  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
-  if (existing) return res.status(400).json({ error: 'Username đã tồn tại' });
-  const hash = bcrypt.hashSync(password, 10);
-  const info = db.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)').run(username, hash, role);
-  res.json({ id: info.lastInsertRowid });
-});
-
-app.put('/api/users/:id', requireRole('admin'), (req, res) => {
-  const id = Number(req.params.id);
-  if (id === req.user.id) return res.status(400).json({ error: 'Không thể sửa chính mình qua đây' });
-  const { role } = req.body;
-  if (!['admin', 'editor', 'viewer'].includes(role)) return res.status(400).json({ error: 'Role không hợp lệ' });
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
-  if (!user) return res.status(404).json({ error: 'Không tìm thấy người dùng' });
-  db.prepare("UPDATE users SET role = ?, updated_at = datetime('now') WHERE id = ?").run(role, id);
-  res.json({ ok: true });
-});
-
-app.delete('/api/users/:id', requireRole('admin'), (req, res) => {
-  const id = Number(req.params.id);
-  if (id === req.user.id) return res.status(400).json({ error: 'Không thể xóa chính mình' });
-  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(id);
-  if (!user) return res.status(404).json({ error: 'Không tìm thấy người dùng' });
-  db.prepare('DELETE FROM users WHERE id = ?').run(id);
-  res.json({ ok: true });
-});
-
-// Chuyển chữ có dấu tiếng Việt thành không dấu (Điện -> Dien, áp -> ap...) trước khi
-// sanitize, tránh việc sanitizeTbKey biến toàn bộ ký tự có dấu thành "_" làm mất
-// nghĩa và dễ khiến 2 tên khác nhau bị trùng thành cùng 1 key (đè giá trị lên nhau).
 function removeVietnameseTones(str) {
   let s = String(str).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   s = s.replace(/đ/g, 'd').replace(/Đ/g, 'D');
@@ -131,7 +54,6 @@ function sanitizeTbKey(key) {
   return noTone.replace(/[^a-zA-Z0-9_\-\.]/g, '_').replace(/[_\-\.]+/g, '_').replace(/^_|_$/g, '');
 }
 
-// ---------- helpers ----------
 function channelWithCounts(ch) {
   const devCount = db.prepare('SELECT COUNT(*) c FROM devices WHERE channel_id=?').get(ch.id).c;
   const tagCount = db.prepare(
@@ -149,616 +71,10 @@ function deviceWithCounts(dev) {
   return { ...dev, tagCount, default_tb_device };
 }
 
-// ---------- IMPORT / EXPORT ----------
 function stripBom(str) {
   if (typeof str === 'string' && str.charCodeAt(0) === 0xfeff) return str.slice(1);
   return str;
 }
-
-app.post('/api/import', upload.single('file'), (req, res) => {
-  try {
-    let jsonText;
-    if (req.file) jsonText = stripBom(req.file.buffer.toString('utf-8'));
-    else if (req.body && Object.keys(req.body).length) jsonText = JSON.stringify(req.body);
-    else return res.status(400).json({ error: 'Thiếu file JSON (field "file") hoặc JSON body' });
-
-    const parsed = JSON.parse(jsonText);
-    const mode = req.body?.mode === 'merge' || req.query.mode === 'merge' ? 'merge' : 'replace';
-    const stats = mode === 'merge' ? mergeProject(parsed) : importProject(parsed);
-    res.json({ ok: true, mode, imported: stats });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-// Import trực tiếp bằng JSON body (dùng cho script/CLI, không cần multipart)
-app.post('/api/import-json', (req, res) => {
-  try {
-    const mode = req.query.mode === 'merge' ? 'merge' : 'replace';
-    const stats = mode === 'merge' ? mergeProject(req.body) : importProject(req.body);
-    res.json({ ok: true, mode, imported: stats });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
-});
-
-app.get('/api/export', (req, res) => {
-  try {
-    const project = exportProject();
-    res.setHeader('Content-Disposition', 'attachment; filename="kepware-export.json"');
-    res.setHeader('Content-Type', 'application/json');
-    res.send(JSON.stringify(project, null, 2));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/reset', (req, res) => {
-  db.exec('DELETE FROM tags; DELETE FROM devices; DELETE FROM channels; DELETE FROM project; DELETE FROM thingsboard_devices; DELETE FROM tag_tb_devices; DELETE FROM custom_tags; DELETE FROM custom_tag_sources; DELETE FROM custom_tag_tb_devices;');
-  res.json({ ok: true });
-});
-
-// ---------- DASHBOARD / STATS ----------
-app.get('/api/stats', (req, res) => {
-  const totals = {
-    channels: db.prepare('SELECT COUNT(*) c FROM channels').get().c,
-    devices: db.prepare('SELECT COUNT(*) c FROM devices').get().c,
-    tags: db.prepare('SELECT COUNT(*) c FROM tags').get().c,
-    customTags: db.prepare('SELECT COUNT(*) c FROM custom_tags').get().c,
-  };
-  const byDataType = db.prepare(
-    'SELECT data_type, COUNT(*) count FROM tags GROUP BY data_type ORDER BY count DESC'
-  ).all().map((r) => ({ ...r, dataTypeName: DATA_TYPES[r.data_type] || `Unknown(${r.data_type})` }));
-
-  const byDeviceScanRate = db.prepare(
-    'SELECT scan_rate_ms, COUNT(*) count FROM devices GROUP BY scan_rate_ms ORDER BY count DESC'
-  ).all();
-
-  const duplicateIPs = db.prepare(
-    `SELECT ip, COUNT(*) count, GROUP_CONCAT(name, ', ') devices
-     FROM devices WHERE ip IS NOT NULL GROUP BY ip HAVING COUNT(*) > 1`
-  ).all();
-
-  res.json({ totals, byDataType, byDeviceScanRate, duplicateIPs });
-});
-
-app.get('/api/validate', (req, res) => {
-  const dupTagNames = db.prepare(
-    `SELECT t.device_id, t.name, COUNT(*) count, GROUP_CONCAT(t.id, ',') tag_ids, d.name device_name, c.name channel_name
-     FROM tags t
-     JOIN devices d ON d.id = t.device_id
-     JOIN channels c ON c.id = d.channel_id
-     GROUP BY t.device_id, t.name HAVING COUNT(*) > 1`
-  ).all();
-  const dupTagAddress = db.prepare(
-    `SELECT t.device_id, t.address, COUNT(*) count, GROUP_CONCAT(t.id, ',') tag_ids, d.name device_name, c.name channel_name
-     FROM tags t
-     JOIN devices d ON d.id = t.device_id
-     JOIN channels c ON c.id = d.channel_id
-     WHERE t.address IS NOT NULL AND t.address != ''
-     GROUP BY t.device_id, t.address HAVING COUNT(*) > 1`
-  ).all();
-  const dupDeviceNames = db.prepare(
-    `SELECT channel_id, name, COUNT(*) count FROM devices GROUP BY channel_id, name HAVING COUNT(*) > 1`
-  ).all();
-  const dupChannelNames = db.prepare(
-    `SELECT name, COUNT(*) count FROM channels GROUP BY name HAVING COUNT(*) > 1`
-  ).all();
-  const emptyAddress = db.prepare(`SELECT COUNT(*) c FROM tags WHERE address IS NULL OR address = ''`).get().c;
-
-  res.json({ dupTagNames, dupTagAddress, dupDeviceNames, dupChannelNames, emptyAddressCount: emptyAddress });
-});
-
-// ---------- CHANNELS ----------
-app.get('/api/channels', (req, res) => {
-  const rows = db.prepare('SELECT id, name, driver, port, sort_order FROM channels ORDER BY sort_order, id').all();
-  res.json(rows.map(channelWithCounts));
-});
-
-app.post('/api/channels', (req, res) => {
-  const { name, driver = 'Modbus TCP/IP Ethernet', port = 502 } = req.body;
-  if (!name) return res.status(400).json({ error: 'Thiếu tên channel' });
-  const raw = {
-    'common.ALLTYPES_NAME': name,
-    'servermain.MULTIPLE_TYPES_DEVICE_DRIVER': driver,
-    'modbus_ethernet.CHANNEL_ETHERNET_PORT_NUMBER': port,
-  };
-  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),-1) m FROM channels').get().m;
-  const info = db.prepare('INSERT INTO channels (name, driver, port, sort_order, raw_json) VALUES (?,?,?,?,?)')
-    .run(name, driver, port, maxOrder + 1, JSON.stringify(raw));
-  res.json({ id: info.lastInsertRowid });
-});
-
-app.put('/api/channels/:id', (req, res) => {
-  const { name, driver, port } = req.body;
-  const ch = db.prepare('SELECT * FROM channels WHERE id=?').get(req.params.id);
-  if (!ch) return res.status(404).json({ error: 'Không tìm thấy channel' });
-  db.prepare('UPDATE channels SET name=?, driver=?, port=? WHERE id=?')
-    .run(name ?? ch.name, driver ?? ch.driver, port ?? ch.port, req.params.id);
-  res.json({ ok: true });
-});
-
-app.delete('/api/channels/:id', (req, res) => {
-  db.prepare('DELETE FROM channels WHERE id=?').run(req.params.id);
-  res.json({ ok: true });
-});
-
-// ---------- DEVICES ----------
-app.get('/api/channels/:channelId/devices', (req, res) => {
-  const rows = db.prepare('SELECT * FROM devices WHERE channel_id=? ORDER BY sort_order, id').all(req.params.channelId);
-  res.json(rows.map(deviceWithCounts));
-});
-
-app.get('/api/devices/:id', (req, res) => {
-  const dev = db.prepare('SELECT * FROM devices WHERE id=?').get(req.params.id);
-  if (!dev) return res.status(404).json({ error: 'Không tìm thấy device' });
-  res.json(deviceWithCounts(dev));
-});
-
-app.post('/api/devices', (req, res) => {
-  const { channel_id, name, ip, slave_id = 1, scan_rate_ms = 1000, conn_timeout_s = 1, req_timeout_ms = 1000, byte_swap = false, word_swap = false, default_tb_device_id = null } = req.body;
-  if (!channel_id || !name || !ip) return res.status(400).json({ error: 'Thiếu channel_id / name / ip' });
-  if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) return res.status(400).json({ error: 'IP không hợp lệ' });
-  if (slave_id < 0 || slave_id > 255) return res.status(400).json({ error: 'Slave ID phải trong khoảng 0-255' });
-  if (default_tb_device_id != null && !db.prepare('SELECT id FROM thingsboard_devices WHERE id=?').get(default_tb_device_id)) {
-    return res.status(400).json({ error: 'Thiết bị ThingsBoard không tồn tại' });
-  }
-
-  const raw = {
-    'common.ALLTYPES_NAME': name,
-    'servermain.DEVICE_ID_STRING': `<${ip}>.${slave_id}`,
-    'servermain.DEVICE_SCAN_MODE_RATE_MS': scan_rate_ms,
-    'servermain.DEVICE_CONNECTION_TIMEOUT_SECONDS': conn_timeout_s,
-    'servermain.DEVICE_REQUEST_TIMEOUT_MILLISECONDS': req_timeout_ms,
-    'modbus_ethernet.DEVICE_ETHERNET_PORT_NUMBER': 502,
-  };
-  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),-1) m FROM devices WHERE channel_id=?').get(channel_id).m;
-  const info = db.prepare(
-    `INSERT INTO devices (channel_id,name,ip,slave_id,scan_rate_ms,conn_timeout_s,req_timeout_ms,sort_order,byte_swap,word_swap,default_tb_device_id,raw_json)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
-  ).run(channel_id, name, ip, slave_id, scan_rate_ms, conn_timeout_s, req_timeout_ms, maxOrder + 1, byte_swap ? 1 : 0, word_swap ? 1 : 0, default_tb_device_id || null, JSON.stringify(raw));
-  res.json({ id: info.lastInsertRowid });
-});
-
-app.put('/api/devices/:id', (req, res) => {
-  const dev = db.prepare('SELECT * FROM devices WHERE id=?').get(req.params.id);
-  if (!dev) return res.status(404).json({ error: 'Không tìm thấy device' });
-  const { name, ip, slave_id, scan_rate_ms, conn_timeout_s, req_timeout_ms, byte_swap, word_swap } = req.body;
-  if (ip && !/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) return res.status(400).json({ error: 'IP không hợp lệ' });
-  if (slave_id != null && (slave_id < 0 || slave_id > 255)) return res.status(400).json({ error: 'Slave ID phải trong khoảng 0-255' });
-
-  // default_tb_device_id: cho phép gửi null để BỎ gán (khác với undefined = không đổi),
-  // nên phải kiểm tra sự có mặt của field trong body thay vì dùng "??".
-  let defaultTbDeviceId = dev.default_tb_device_id;
-  if ('default_tb_device_id' in req.body) {
-    const v = req.body.default_tb_device_id;
-    if (v == null || v === '') {
-      defaultTbDeviceId = null;
-    } else {
-      if (!db.prepare('SELECT id FROM thingsboard_devices WHERE id=?').get(v)) {
-        return res.status(400).json({ error: 'Thiết bị ThingsBoard không tồn tại' });
-      }
-      defaultTbDeviceId = v;
-    }
-  }
-
-  db.prepare(
-    `UPDATE devices SET name=?, ip=?, slave_id=?, scan_rate_ms=?, conn_timeout_s=?, req_timeout_ms=?, byte_swap=?, word_swap=?, default_tb_device_id=? WHERE id=?`
-  ).run(
-    name ?? dev.name, ip ?? dev.ip, slave_id ?? dev.slave_id,
-    scan_rate_ms ?? dev.scan_rate_ms, conn_timeout_s ?? dev.conn_timeout_s, req_timeout_ms ?? dev.req_timeout_ms,
-    byte_swap != null ? (byte_swap ? 1 : 0) : dev.byte_swap,
-    word_swap != null ? (word_swap ? 1 : 0) : dev.word_swap,
-    defaultTbDeviceId,
-    req.params.id
-  );
-  res.json({ ok: true });
-});
-
-app.delete('/api/devices/:id', (req, res) => {
-  db.prepare('DELETE FROM devices WHERE id=?').run(req.params.id);
-  res.json({ ok: true });
-});
-
-app.post('/api/devices/:id/duplicate', (req, res) => {
-  const dev = db.prepare('SELECT * FROM devices WHERE id=?').get(req.params.id);
-  if (!dev) return res.status(404).json({ error: 'Không tìm thấy device' });
-  const { newIp, newName } = req.body;
-  const ip = newIp || dev.ip;
-  const name = newName || `${dev.name}_COPY`;
-  const rawObj = JSON.parse(dev.raw_json);
-  rawObj['common.ALLTYPES_NAME'] = name;
-  rawObj['servermain.DEVICE_ID_STRING'] = `<${ip}>.${dev.slave_id}`;
-
-  const tx = db.transaction(() => {
-    const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),-1) m FROM devices WHERE channel_id=?').get(dev.channel_id).m;
-    const info = db.prepare(
-      `INSERT INTO devices (channel_id,name,ip,slave_id,scan_rate_ms,conn_timeout_s,req_timeout_ms,sort_order,byte_swap,word_swap,default_tb_device_id,raw_json)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
-    ).run(dev.channel_id, name, ip, dev.slave_id, dev.scan_rate_ms, dev.conn_timeout_s, dev.req_timeout_ms, maxOrder + 1, dev.byte_swap, dev.word_swap, dev.default_tb_device_id, JSON.stringify(rawObj));
-    const newDeviceId = info.lastInsertRowid;
-
-    const tags = db.prepare('SELECT * FROM tags WHERE device_id=? ORDER BY sort_order, id').all(dev.id);
-    const insTag = db.prepare(
-      `INSERT INTO tags (device_id,name,address,data_type,rw_access,scaling_type,sort_order,raw_json)
-       VALUES (?,?,?,?,?,?,?,?)`
-    );
-    tags.forEach((t) => {
-      insTag.run(newDeviceId, t.name, t.address, t.data_type, t.rw_access, t.scaling_type, t.sort_order, t.raw_json);
-    });
-    return newDeviceId;
-  });
-
-  const newDeviceId = tx();
-  res.json({ id: newDeviceId });
-});
-
-// ---------- TAGS ----------
-app.get('/api/devices/:deviceId/tags', (req, res) => {
-  const { search = '', sort = 'sort_order', dir = 'asc', page = 1, pageSize = 20, realtime, tb } = req.query;
-  const allowedSort = ['name', 'address', 'data_type', 'rw_access', 'scaling_type', 'sort_order', 'id'];
-  const sortCol = allowedSort.includes(sort) ? sort : 'sort_order';
-  const sortDir = dir === 'desc' ? 'DESC' : 'ASC';
-
-  let where = 'WHERE device_id = ?';
-  const params = [req.params.deviceId];
-  if (search) {
-    where += ' AND (name LIKE ? OR address LIKE ?)';
-    params.push(`%${search}%`, `%${search}%`);
-  }
-  if (realtime == '1') {
-    where += ' AND realtime_enabled = 1';
-  }
-  if (tb == '1') {
-    where += ' AND (tb_telemetry_enabled = 1 OR tb_attributes_enabled = 1)';
-  }
-
-  const total = db.prepare(`SELECT COUNT(*) c FROM tags ${where}`).get(...params).c;
-  const offset = (Number(page) - 1) * Number(pageSize);
-  const rows = db.prepare(
-    `SELECT * FROM tags ${where} ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`
-  ).all(...params, Number(pageSize), offset);
-
-  const tagIds = rows.map((r) => r.id);
-  const tbMap = new Map();
-  if (tagIds.length) {
-    const placeholders = tagIds.map(() => '?').join(',');
-    const mappings = db.prepare(`SELECT tag_id, tb.id, tb.name, tb.host, tb.port FROM tag_tb_devices m JOIN thingsboard_devices tb ON tb.id = m.tb_device_id WHERE m.tag_id IN (${placeholders})`).all(...tagIds);
-    mappings.forEach((m) => {
-      if (!tbMap.has(m.tag_id)) tbMap.set(m.tag_id, []);
-      tbMap.get(m.tag_id).push({ id: m.id, name: m.name, host: m.host, port: m.port });
-    });
-  }
-  // Gộp thêm thiết bị TB được gán mặc định ở cấp Device (nếu có) vào danh sách của
-  // MỌI tag thuộc device này - đây là cơ chế chính giúp không cần gán riêng từng tag.
-  const currentDevice = db.prepare('SELECT default_tb_device_id FROM devices WHERE id=?').get(req.params.deviceId);
-  if (currentDevice?.default_tb_device_id) {
-    const defTb = db.prepare('SELECT id, name, host, port FROM thingsboard_devices WHERE id=?').get(currentDevice.default_tb_device_id);
-    if (defTb) {
-      rows.forEach((r) => {
-        if (!tbMap.has(r.id)) tbMap.set(r.id, []);
-        if (!tbMap.get(r.id).some((tb) => tb.id === defTb.id)) {
-          tbMap.get(r.id).push({ ...defTb, inherited: true });
-        }
-      });
-    }
-  }
-
-  res.json({ total, page: Number(page), pageSize: Number(pageSize), rows: rows.map((r) => ({ ...r, tb_devices: tbMap.get(r.id) || [] })) });
-});
-
-app.get('/api/tb-devices/:tbDeviceId/tags', (req, res) => {
-  const { search = '', sort = 'sort_order', dir = 'asc', page = 1, pageSize = 20 } = req.query;
-  const allowedSort = ['name', 'address', 'data_type', 'rw_access', 'scaling_type', 'sort_order', 'id'];
-  const sortCol = allowedSort.includes(sort) ? sort : 'sort_order';
-  const sortDir = dir === 'desc' ? 'DESC' : 'ASC';
-
-  // Bao gồm cả tag được gán riêng qua tag_tb_devices LẪN tag thuộc device có
-  // default_tb_device_id = thiết bị TB này (gán ở cấp Device).
-  let where = `WHERE (t.id IN (SELECT tag_id FROM tag_tb_devices WHERE tb_device_id = ?) OR t.device_id IN (SELECT id FROM devices WHERE default_tb_device_id = ?))`;
-  const params = [req.params.tbDeviceId, req.params.tbDeviceId];
-  if (search) {
-    where += ' AND (t.name LIKE ? OR t.address LIKE ?)';
-    params.push(`%${search}%`, `%${search}%`);
-  }
-
-  const total = db.prepare(`SELECT COUNT(*) c FROM tags t ${where}`).get(...params).c;
-  const offset = (Number(page) - 1) * Number(pageSize);
-  const rows = db.prepare(
-    `SELECT t.* FROM tags t ${where} ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`
-  ).all(...params, Number(pageSize), offset);
-
-  const tagIds = rows.map((r) => r.id);
-  const tbMap = new Map();
-  if (tagIds.length) {
-    const placeholders = tagIds.map(() => '?').join(',');
-    const mappings = db.prepare(`SELECT tag_id, tb.id, tb.name, tb.host, tb.port FROM tag_tb_devices m JOIN thingsboard_devices tb ON tb.id = m.tb_device_id WHERE m.tag_id IN (${placeholders})`).all(...tagIds);
-    mappings.forEach((m) => {
-      if (!tbMap.has(m.tag_id)) tbMap.set(m.tag_id, []);
-      tbMap.get(m.tag_id).push({ id: m.id, name: m.name, host: m.host, port: m.port });
-    });
-  }
-
-  res.json({ total, page: Number(page), pageSize: Number(pageSize), rows: rows.map((r) => ({ ...r, tb_devices: tbMap.get(r.id) || [] })) });
-});
-
-app.post('/api/tags', (req, res) => {
-  const { device_id, name, address, data_type = 5, rw_access = 0, scaling = null, decimals = 2, realtime_enabled = 0, tb_telemetry_enabled = 0, tb_telemetry_interval_ms = 5000, tb_attributes_enabled = 0, tb_attributes_interval_ms = 5000 } = req.body;
-  if (!device_id || !name || address == null) return res.status(400).json({ error: 'Thiếu device_id / name / address' });
-
-  const raw = {
-    'common.ALLTYPES_NAME': name,
-    'servermain.TAG_ADDRESS': String(address),
-    'servermain.TAG_DATA_TYPE': data_type,
-    'servermain.TAG_READ_WRITE_ACCESS': rw_access,
-    'servermain.TAG_SCALING_TYPE': scaling ? 1 : 0,
-  };
-  if (scaling) {
-    raw['servermain.TAG_SCALING_RAW_LOW'] = scaling.rawLow;
-    raw['servermain.TAG_SCALING_RAW_HIGH'] = scaling.rawHigh;
-    raw['servermain.TAG_SCALING_SCALED_DATA_TYPE'] = scaling.scaledDataType;
-    raw['servermain.TAG_SCALING_SCALED_LOW'] = scaling.scaledLow;
-    raw['servermain.TAG_SCALING_SCALED_HIGH'] = scaling.scaledHigh;
-    raw['servermain.TAG_SCALING_CLAMP_LOW'] = !!scaling.clampLow;
-    raw['servermain.TAG_SCALING_CLAMP_HIGH'] = !!scaling.clampHigh;
-    raw['servermain.TAG_SCALING_NEGATE_VALUE'] = !!scaling.negate;
-    raw['servermain.TAG_SCALING_UNITS'] = scaling.units || '';
-  }
-
-  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),-1) m FROM tags WHERE device_id=?').get(device_id).m;
-  const info = db.prepare(
-    `INSERT INTO tags (device_id,name,address,data_type,rw_access,scaling_type,sort_order,decimals,realtime_enabled,tb_telemetry_enabled,tb_telemetry_interval_ms,tb_attributes_enabled,tb_attributes_interval_ms,raw_json)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-  ).run(device_id, name, String(address), data_type, rw_access, scaling ? 1 : 0, maxOrder + 1, Number.isInteger(decimals) ? decimals : 2, realtime_enabled ? 1 : 0, tb_telemetry_enabled ? 1 : 0, Number.isInteger(tb_telemetry_interval_ms) ? tb_telemetry_interval_ms : 5000, tb_attributes_enabled ? 1 : 0, Number.isInteger(tb_attributes_interval_ms) ? tb_attributes_interval_ms : 5000, JSON.stringify(raw));
-  res.json({ id: info.lastInsertRowid });
-});
-
-app.put('/api/tags/:id', (req, res) => {
-  const tag = db.prepare('SELECT * FROM tags WHERE id=?').get(req.params.id);
-  if (!tag) return res.status(404).json({ error: 'Không tìm thấy tag' });
-  const raw = JSON.parse(tag.raw_json);
-  const { name, address, data_type, rw_access, scaling, decimals, realtime_enabled, tb_telemetry_enabled, tb_telemetry_interval_ms, tb_attributes_enabled, tb_attributes_interval_ms } = req.body;
-
-  if (name != null) raw['common.ALLTYPES_NAME'] = name;
-  if (address != null) raw['servermain.TAG_ADDRESS'] = String(address);
-  if (data_type != null) raw['servermain.TAG_DATA_TYPE'] = data_type;
-  if (rw_access != null) raw['servermain.TAG_READ_WRITE_ACCESS'] = rw_access;
-  if (scaling !== undefined) {
-    raw['servermain.TAG_SCALING_TYPE'] = scaling ? 1 : 0;
-    if (scaling) {
-      raw['servermain.TAG_SCALING_RAW_LOW'] = scaling.rawLow;
-      raw['servermain.TAG_SCALING_RAW_HIGH'] = scaling.rawHigh;
-      raw['servermain.TAG_SCALING_SCALED_DATA_TYPE'] = scaling.scaledDataType;
-      raw['servermain.TAG_SCALING_SCALED_LOW'] = scaling.scaledLow;
-      raw['servermain.TAG_SCALING_SCALED_HIGH'] = scaling.scaledHigh;
-      raw['servermain.TAG_SCALING_CLAMP_LOW'] = !!scaling.clampLow;
-      raw['servermain.TAG_SCALING_CLAMP_HIGH'] = !!scaling.clampHigh;
-      raw['servermain.TAG_SCALING_NEGATE_VALUE'] = !!scaling.negate;
-      raw['servermain.TAG_SCALING_UNITS'] = scaling.units || '';
-    }
-  }
-
-  db.prepare(
-    `UPDATE tags SET name=?, address=?, data_type=?, rw_access=?, scaling_type=?, decimals=?, realtime_enabled=?, tb_telemetry_enabled=?, tb_telemetry_interval_ms=?, tb_attributes_enabled=?, tb_attributes_interval_ms=?, raw_json=? WHERE id=?`
-  ).run(
-    name ?? tag.name, address != null ? String(address) : tag.address, data_type ?? tag.data_type,
-    rw_access ?? tag.rw_access,
-    scaling !== undefined ? (scaling ? 1 : 0) : tag.scaling_type,
-    Number.isInteger(decimals) ? decimals : tag.decimals,
-    realtime_enabled != null ? (realtime_enabled ? 1 : 0) : tag.realtime_enabled,
-    tb_telemetry_enabled != null ? (tb_telemetry_enabled ? 1 : 0) : tag.tb_telemetry_enabled,
-    Number.isInteger(tb_telemetry_interval_ms) ? tb_telemetry_interval_ms : tag.tb_telemetry_interval_ms,
-    tb_attributes_enabled != null ? (tb_attributes_enabled ? 1 : 0) : tag.tb_attributes_enabled,
-    Number.isInteger(tb_attributes_interval_ms) ? tb_attributes_interval_ms : tag.tb_attributes_interval_ms,
-    JSON.stringify(raw), req.params.id
-  );
-  res.json({ ok: true });
-});
-
-app.delete('/api/tags/:id', (req, res) => {
-  db.prepare('DELETE FROM tags WHERE id=?').run(req.params.id);
-  res.json({ ok: true });
-});
-
-app.post('/api/tags/bulk-delete', (req, res) => {
-  const { ids } = req.body;
-  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'Thiếu danh sách ids' });
-  const placeholders = ids.map(() => '?').join(',');
-  db.prepare(`DELETE FROM tags WHERE id IN (${placeholders})`).run(...ids);
-  res.json({ ok: true, deleted: ids.length });
-});
-
-app.post('/api/tags/bulk-update', (req, res) => {
-  const { ids, patch } = req.body;
-  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'Thiếu danh sách ids' });
-  const tx = db.transaction(() => {
-    ids.forEach((id) => {
-      const tag = db.prepare('SELECT * FROM tags WHERE id=?').get(id);
-      if (!tag) return;
-      const raw = JSON.parse(tag.raw_json);
-      if (patch.rw_access != null) raw['servermain.TAG_READ_WRITE_ACCESS'] = patch.rw_access;
-      const sets = ['rw_access=?', 'raw_json=?'];
-      const vals = [patch.rw_access ?? tag.rw_access, JSON.stringify(raw)];
-      if (patch.realtime_enabled != null) { sets.push('realtime_enabled=?'); vals.push(patch.realtime_enabled ? 1 : 0); }
-      vals.push(id);
-      db.prepare(`UPDATE tags SET ${sets.join(', ')} WHERE id=?`).run(...vals);
-    });
-  });
-  tx();
-  res.json({ ok: true, updated: ids.length });
-});
-
-// Thêm tag hàng loạt từ CSV/TSV dán vào (name, address, data_type, scan_rate)
-app.post('/api/tags/bulk-create', (req, res) => {
-  const { device_id, csv } = req.body;
-  if (!device_id || !csv) return res.status(400).json({ error: 'Thiếu device_id / csv' });
-
-  const lines = csv.split('\n').map((l) => l.trim()).filter(Boolean);
-  const insTag = db.prepare(
-    `INSERT INTO tags (device_id,name,address,data_type,rw_access,scaling_type,sort_order,raw_json)
-     VALUES (?,?,?,?,?,0,?,?)`
-  );
-  let maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),-1) m FROM tags WHERE device_id=?').get(device_id).m;
-  const created = [];
-  const errors = [];
-
-  const tx = db.transaction(() => {
-    lines.forEach((line, idx) => {
-      const parts = line.split(/\t|,/).map((p) => p.trim());
-      const [name, address, dataType] = parts;
-      if (!name || !address) { errors.push({ line: idx + 1, reason: 'Thiếu tên hoặc địa chỉ' }); return; }
-      const dt = dataType ? Number(dataType) : 5;
-      maxOrder++;
-      const raw = {
-        'common.ALLTYPES_NAME': name,
-        'servermain.TAG_ADDRESS': address,
-        'servermain.TAG_DATA_TYPE': dt,
-        'servermain.TAG_READ_WRITE_ACCESS': 0,
-        'servermain.TAG_SCALING_TYPE': 0,
-      };
-      const info = insTag.run(device_id, name, address, dt, 0, maxOrder, JSON.stringify(raw));
-      created.push(info.lastInsertRowid);
-    });
-  });
-  tx();
-  res.json({ ok: true, created: created.length, errors });
-});
-
-// ---------- REALTIME (đọc giá trị THẬT từ PLC qua Modbus TCP) ----------
-// Chỉ đọc khi được gọi rõ ràng (người dùng bật Realtime trên UI) - không tự polling nền.
-app.post('/api/devices/:id/live-read', async (req, res) => {
-  const dev = db.prepare('SELECT * FROM devices WHERE id=?').get(req.params.id);
-  if (!dev) return res.status(404).json({ error: 'Không tìm thấy device' });
-  if (!dev.ip) return res.status(400).json({ error: 'Device chưa có IP hợp lệ' });
-
-  const { tagIds } = req.body;
-  if (!Array.isArray(tagIds) || !tagIds.length) return res.status(400).json({ error: 'Thiếu danh sách tagIds' });
-
-  const placeholders = tagIds.map(() => '?').join(',');
-  const tags = db.prepare(`SELECT * FROM tags WHERE id IN (${placeholders}) AND device_id=?`).all(...tagIds, dev.id);
-  if (!tags.length) return res.json({ values: {} });
-
-  try {
-    const values = await readTagsForDevice(dev, tags);
-    res.json({ values });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Đóng kết nối Modbus TCP tới 1 device (khi rời trang / tắt Realtime)
-app.post('/api/devices/:id/live-disconnect', (req, res) => {
-  closeConnection(Number(req.params.id));
-  res.json({ ok: true });
-});
-
-// ---------- THINGSBOARD ----------
-app.get('/api/thingsboard-devices', (req, res) => {
-  const { page, pageSize } = req.query;
-  if (!page || !pageSize) {
-    const rows = db.prepare('SELECT * FROM thingsboard_devices ORDER BY sort_order, id').all();
-    return res.json(rows);
-  }
-  const total = db.prepare('SELECT COUNT(*) c FROM thingsboard_devices').get().c;
-  const offset = (Number(page) - 1) * Number(pageSize);
-  const rows = db.prepare('SELECT * FROM thingsboard_devices ORDER BY sort_order, id LIMIT ? OFFSET ?').all(Number(pageSize), offset);
-  res.json({ total, page: Number(page), pageSize: Number(pageSize), rows });
-});
-
-app.post('/api/thingsboard-devices', (req, res) => {
-  const { name, host, port = 80, access_token, device_name, protocol = 'http', telemetry_interval_ms = 5000, attributes_interval_ms = 5000, request_timeout_ms = 5000, enabled = true } = req.body;
-  if (!name || !host || !access_token) return res.status(400).json({ error: 'Thiếu tên / host / access_token' });
-  const protocolNorm = protocol === 'https' ? 'https' : 'http';
-  const raw = { name, host, port, access_token, device_name, protocol: protocolNorm, telemetry_interval_ms, attributes_interval_ms, request_timeout_ms, enabled };
-  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),-1) m FROM thingsboard_devices').get().m;
-  const info = db.prepare('INSERT INTO thingsboard_devices (name, host, port, protocol, access_token, device_name, telemetry_interval_ms, attributes_interval_ms, request_timeout_ms, enabled, sort_order, raw_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
-    .run(name, host, port, protocolNorm, access_token, device_name || null, telemetry_interval_ms, attributes_interval_ms, request_timeout_ms, enabled ? 1 : 0, maxOrder + 1, JSON.stringify(raw));
-  res.json({ id: info.lastInsertRowid });
-});
-
-app.put('/api/thingsboard-devices/:id', (req, res) => {
-  const tb = db.prepare('SELECT * FROM thingsboard_devices WHERE id=?').get(req.params.id);
-  if (!tb) return res.status(404).json({ error: 'Không tìm thấy thiết bị ThingsBoard' });
-  const { name, host, port, access_token, device_name, protocol, telemetry_interval_ms, attributes_interval_ms, request_timeout_ms, enabled } = req.body;
-  const protocolNorm = protocol != null ? (protocol === 'https' ? 'https' : 'http') : tb.protocol;
-  db.prepare('UPDATE thingsboard_devices SET name=?, host=?, port=?, protocol=?, access_token=?, device_name=?, telemetry_interval_ms=?, attributes_interval_ms=?, request_timeout_ms=?, enabled=? WHERE id=?')
-    .run(name ?? tb.name, host ?? tb.host, port ?? tb.port, protocolNorm, access_token ?? tb.access_token, device_name ?? tb.device_name, telemetry_interval_ms ?? tb.telemetry_interval_ms, attributes_interval_ms ?? tb.attributes_interval_ms, request_timeout_ms ?? tb.request_timeout_ms, enabled != null ? (enabled ? 1 : 0) : tb.enabled, req.params.id);
-  const raw = JSON.parse(tb.raw_json);
-  if (name != null) raw.name = name;
-  if (host != null) raw.host = host;
-  if (port != null) raw.port = port;
-  if (access_token != null) raw.access_token = access_token;
-  if (device_name != null) raw.device_name = device_name;
-  if (protocol != null) raw.protocol = protocol;
-  if (telemetry_interval_ms != null) raw.telemetry_interval_ms = telemetry_interval_ms;
-  if (attributes_interval_ms != null) raw.attributes_interval_ms = attributes_interval_ms;
-  if (request_timeout_ms != null) raw.request_timeout_ms = request_timeout_ms;
-  if (enabled != null) raw.enabled = enabled;
-  db.prepare('UPDATE thingsboard_devices SET raw_json=? WHERE id=?').run(JSON.stringify(raw), req.params.id);
-  res.json({ ok: true });
-});
-
-app.delete('/api/thingsboard-devices/:id', (req, res) => {
-  db.prepare('DELETE FROM thingsboard_devices WHERE id=?').run(req.params.id);
-  db.prepare('DELETE FROM tag_tb_devices WHERE tb_device_id=?').run(req.params.id);
-  // Bỏ gán ở cấp Device cho các device đang trỏ tới thiết bị TB vừa bị xoá
-  db.prepare('UPDATE devices SET default_tb_device_id=NULL WHERE default_tb_device_id=?').run(req.params.id);
-  res.json({ ok: true });
-});
-
-app.get('/api/tags/:tagId/tb-devices', (req, res) => {
-  const rows = db.prepare('SELECT tb.* FROM thingsboard_devices tb JOIN tag_tb_devices m ON tb.id = m.tb_device_id WHERE m.tag_id=? ORDER BY tb.sort_order, tb.id').all(req.params.tagId);
-  res.json(rows);
-});
-
-app.post('/api/tags/:tagId/tb-devices', (req, res) => {
-  const { tb_device_id } = req.body;
-  if (!tb_device_id) return res.status(400).json({ error: 'Thiếu tb_device_id' });
-  db.prepare('INSERT OR IGNORE INTO tag_tb_devices (tag_id, tb_device_id) VALUES (?,?)').run(req.params.tagId, tb_device_id);
-  res.json({ ok: true });
-});
-
-app.delete('/api/tags/:tagId/tb-devices/:tbDeviceId', (req, res) => {
-  db.prepare('DELETE FROM tag_tb_devices WHERE tag_id=? AND tb_device_id=?').run(req.params.tagId, req.params.tbDeviceId);
-  res.json({ ok: true });
-});
-
-app.get('/api/tb-stats', (req, res) => {
-  const total = db.prepare('SELECT COUNT(*) c FROM thingsboard_devices').get().c;
-  const enabled = db.prepare('SELECT COUNT(*) c FROM thingsboard_devices WHERE enabled=1').get().c;
-  const mappings = db.prepare('SELECT COUNT(*) c FROM tag_tb_devices').get().c;
-  res.json({ total, enabled, mappings });
-});
-
-// ---------- tree (channel > device > tagCount), dùng cho sidebar ----------
-app.get('/api/tree', (req, res) => {
-  const channels = db.prepare('SELECT id, name, driver, port, sort_order FROM channels ORDER BY sort_order, id').all();
-  const devStmt = db.prepare('SELECT id, name FROM devices WHERE channel_id=? ORDER BY sort_order, id');
-  const tagCountStmt = db.prepare('SELECT COUNT(*) c FROM tags WHERE device_id=?');
-  const tree = channels.map((ch) => ({
-    ...ch,
-    devices: devStmt.all(ch.id).map((d) => ({ ...d, tagCount: tagCountStmt.get(d.id).c })),
-  }));
-  res.json(tree);
-});
-
-app.get('/api/data-types', (req, res) => res.json(DATA_TYPES));
-
-app.get('/api/health', (req, res) => res.json({ ok: true, time: new Date().toISOString() }));
-
-app.get('/api/live-fetch', async (req, res) => {
-  try {
-    const configs = getApiFetchConfigs();
-    const [cleanWater, rawWater, viwater] = await Promise.all([
-      fetchCleanWaterLive(configs.clean_water?.fetch_interval_ms || 10000),
-      fetchRawWaterLive(configs.raw_water?.fetch_interval_ms || 10000),
-      fetchViwaterLive(configs.viwater?.fetch_interval_ms || 10000),
-    ]);
-    res.json({ cleanWater, rawWater, viwater });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 function getApiFetchConfigs() {
   const rows = db.prepare('SELECT channel_key, label, fetch_interval_ms FROM api_fetch_configs').all();
@@ -767,182 +83,25 @@ function getApiFetchConfigs() {
   return map;
 }
 
-app.get('/api/api-fetch-configs', (req, res) => {
-  res.json(getApiFetchConfigs());
-});
+const helpers = {
+  channelWithCounts,
+  deviceWithCounts,
+  sanitizeTbKey,
+  stripBom,
+  getApiFetchConfigs,
+  tagValueCache,
+  customTagValueCache,
+};
 
-app.put('/api/api-fetch-configs/:channelKey', (req, res) => {
-  const { fetch_interval_ms } = req.body;
-  const row = db.prepare('SELECT * FROM api_fetch_configs WHERE channel_key=?').get(req.params.channelKey);
-  if (!row) return res.status(404).json({ error: 'Không tìm thấy cấu hình fetch' });
-  if (fetch_interval_ms != null && (!Number.isInteger(fetch_interval_ms) || fetch_interval_ms < 1000)) {
-    return res.status(400).json({ error: 'fetch_interval_ms phải là số nguyên >= 1000' });
-  }
-  db.prepare('UPDATE api_fetch_configs SET fetch_interval_ms=? WHERE channel_key=?')
-    .run(fetch_interval_ms ?? row.fetch_interval_ms, req.params.channelKey);
-  res.json({ ok: true });
-});
-
-app.get('/api/api-tb-mappings', (req, res) => {
-  const rows = db.prepare('SELECT api_key, tb_device_id, telemetry_enabled, attributes_enabled, telemetry_interval_ms, attributes_interval_ms FROM api_tb_mappings').all();
-  res.json(rows);
-});
-
-app.post('/api/api-tb-mappings', (req, res) => {
-  const { api_key, mappings, tb_device_id, telemetry_enabled = 1, attributes_enabled = 1, telemetry_interval_ms = 5000, attributes_interval_ms = 5000 } = req.body;
-  if (!api_key) return res.status(400).json({ error: 'Thiếu api_key' });
-  if (mappings && Array.isArray(mappings)) {
-    const tx = db.transaction(() => {
-      db.prepare('DELETE FROM api_tb_mappings WHERE api_key=?').run(api_key);
-      const ins = db.prepare('INSERT INTO api_tb_mappings (api_key, tb_device_id, enabled, telemetry_enabled, attributes_enabled, telemetry_interval_ms, attributes_interval_ms) VALUES (?,?,?,?,?,?,?)');
-      mappings.forEach(m => {
-        ins.run(api_key, m.tb_device_id, 1, m.telemetry_enabled ? 1 : 0, m.attributes_enabled ? 1 : 0, Number(m.telemetry_interval_ms) || 5000, Number(m.attributes_interval_ms) || 5000);
-      });
-    });
-    tx();
-    res.json({ ok: true });
-  } else if (tb_device_id) {
-    db.prepare('INSERT OR REPLACE INTO api_tb_mappings (api_key, tb_device_id, enabled, telemetry_enabled, attributes_enabled, telemetry_interval_ms, attributes_interval_ms) VALUES (?,?,?,?,?,?,?)')
-      .run(api_key, tb_device_id, 1, telemetry_enabled ? 1 : 0, attributes_enabled ? 1 : 0, Number(telemetry_interval_ms) || 5000, Number(attributes_interval_ms) || 5000);
-    res.json({ ok: true });
-  } else {
-    return res.status(400).json({ error: 'Thiếu mappings hoặc tb_device_id' });
-  }
-});
-
-app.put('/api/api-tb-mappings', (req, res) => {
-  const { api_key, tb_device_id, telemetry_enabled, attributes_enabled, telemetry_interval_ms, attributes_interval_ms } = req.body;
-  if (!api_key || !tb_device_id) return res.status(400).json({ error: 'Thiếu api_key / tb_device_id' });
-  const mapping = db.prepare('SELECT * FROM api_tb_mappings WHERE api_key=? AND tb_device_id=?').get(api_key, tb_device_id);
-  if (!mapping) return res.status(404).json({ error: 'Không tìm thấy mapping' });
-  db.prepare('UPDATE api_tb_mappings SET telemetry_enabled=?, attributes_enabled=?, telemetry_interval_ms=?, attributes_interval_ms=? WHERE api_key=? AND tb_device_id=?')
-    .run(telemetry_enabled != null ? (telemetry_enabled ? 1 : 0) : mapping.telemetry_enabled, attributes_enabled != null ? (attributes_enabled ? 1 : 0) : mapping.attributes_enabled, telemetry_interval_ms != null ? Number(telemetry_interval_ms) : mapping.telemetry_interval_ms, attributes_interval_ms != null ? Number(attributes_interval_ms) : mapping.attributes_interval_ms, api_key, tb_device_id);
-  res.json({ ok: true });
-});
-
-app.delete('/api/api-tb-mappings', (req, res) => {
-  const { api_key, tb_device_id } = req.body;
-  if (!api_key) return res.status(400).json({ error: 'Thiếu api_key' });
-  if (tb_device_id) {
-    db.prepare('DELETE FROM api_tb_mappings WHERE api_key=? AND tb_device_id=?').run(api_key, tb_device_id);
-  } else {
-    db.prepare('DELETE FROM api_tb_mappings WHERE api_key=?').run(api_key);
-  }
-  res.json({ ok: true });
-});
-
-// ---------- CUSTOM TAGS ----------
-app.get('/api/custom-tags', (req, res) => {
-  const rows = db.prepare('SELECT * FROM custom_tags ORDER BY sort_order, id').all();
-  res.json(rows);
-});
-
-app.post('/api/custom-tags', (req, res) => {
-  const { name, expression, decimals = 2, realtime_enabled = 0, tb_telemetry_enabled = 0, tb_telemetry_interval_ms = 5000, tb_attributes_enabled = 0, tb_attributes_interval_ms = 5000 } = req.body;
-  if (!name || !expression) return res.status(400).json({ error: 'Thiếu tên / biểu thức' });
-  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),-1) m FROM custom_tags').get().m;
-  const info = db.prepare(
-    `INSERT INTO custom_tags (name, expression, decimals, sort_order, realtime_enabled, tb_telemetry_enabled, tb_telemetry_interval_ms, tb_attributes_enabled, tb_attributes_interval_ms, raw_json) VALUES (?,?,?,?,?,?,?,?,?,?)`
-  ).run(name, expression, Number.isInteger(decimals) ? decimals : 2, maxOrder + 1, realtime_enabled ? 1 : 0, tb_telemetry_enabled ? 1 : 0, Number.isInteger(tb_telemetry_interval_ms) ? tb_telemetry_interval_ms : 5000, tb_attributes_enabled ? 1 : 0, Number.isInteger(tb_attributes_interval_ms) ? tb_attributes_interval_ms : 5000, JSON.stringify({ name, expression }));
-  res.json({ id: info.lastInsertRowid });
-});
-
-app.put('/api/custom-tags/:id', (req, res) => {
-  const ct = db.prepare('SELECT * FROM custom_tags WHERE id=?').get(req.params.id);
-  if (!ct) return res.status(404).json({ error: 'Không tìm thấy CustomTag' });
-  const raw = JSON.parse(ct.raw_json);
-  const { name, expression, decimals, realtime_enabled, tb_telemetry_enabled, tb_telemetry_interval_ms, tb_attributes_enabled, tb_attributes_interval_ms } = req.body;
-  if (name != null) raw.name = name;
-  if (expression != null) raw.expression = expression;
-  db.prepare(
-    `UPDATE custom_tags SET name=?, expression=?, decimals=?, realtime_enabled=?, tb_telemetry_enabled=?, tb_telemetry_interval_ms=?, tb_attributes_enabled=?, tb_attributes_interval_ms=?, raw_json=? WHERE id=?`
-  ).run(
-    name ?? ct.name, expression ?? ct.expression,
-    Number.isInteger(decimals) ? decimals : ct.decimals,
-    realtime_enabled != null ? (realtime_enabled ? 1 : 0) : ct.realtime_enabled,
-    tb_telemetry_enabled != null ? (tb_telemetry_enabled ? 1 : 0) : ct.tb_telemetry_enabled,
-    Number.isInteger(tb_telemetry_interval_ms) ? tb_telemetry_interval_ms : ct.tb_telemetry_interval_ms,
-    tb_attributes_enabled != null ? (tb_attributes_enabled ? 1 : 0) : ct.tb_attributes_enabled,
-    Number.isInteger(tb_attributes_interval_ms) ? tb_attributes_interval_ms : ct.tb_attributes_interval_ms,
-    JSON.stringify(raw), req.params.id
-  );
-  res.json({ ok: true });
-});
-
-app.delete('/api/custom-tags/:id', (req, res) => {
-  db.prepare('DELETE FROM custom_tags WHERE id=?').run(req.params.id);
-  res.json({ ok: true });
-});
-
-app.get('/api/custom-tags/:id/sources', (req, res) => {
-  const rows = db.prepare('SELECT * FROM custom_tag_sources WHERE custom_tag_id=? ORDER BY sort_order, id').all(req.params.id);
-  res.json(rows);
-});
-
-app.post('/api/custom-tags/:id/sources', (req, res) => {
-  const ct = db.prepare('SELECT id FROM custom_tags WHERE id=?').get(req.params.id);
-  if (!ct) return res.status(404).json({ error: 'Không tìm thấy CustomTag' });
-  const { source_type, source_tag_id, source_api_key, source_custom_tag_id } = req.body;
-  if (!source_type) return res.status(400).json({ error: 'Thiếu source_type' });
-  if (source_type === 'tag' && !source_tag_id) return res.status(400).json({ error: 'Thiếu source_tag_id' });
-  if (source_type === 'api_key' && !source_api_key) return res.status(400).json({ error: 'Thiếu source_api_key' });
-  if (source_type === 'custom_tag' && !source_custom_tag_id) return res.status(400).json({ error: 'Thiếu source_custom_tag_id' });
-  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),-1) m FROM custom_tag_sources WHERE custom_tag_id=?').get(req.params.id).m;
-  const info = db.prepare('INSERT INTO custom_tag_sources (custom_tag_id, source_type, source_tag_id, source_api_key, source_custom_tag_id, sort_order) VALUES (?,?,?,?,?,?)')
-    .run(req.params.id, source_type, source_tag_id || null, source_api_key || null, source_custom_tag_id || null, maxOrder + 1);
-  res.json({ id: info.lastInsertRowid });
-});
-
-app.delete('/api/custom-tags/:id/sources/:sid', (req, res) => {
-  db.prepare('DELETE FROM custom_tag_sources WHERE id=? AND custom_tag_id=?').run(req.params.sid, req.params.id);
-  res.json({ ok: true });
-});
-
-app.get('/api/custom-tags/:id/tb-devices', (req, res) => {
-  const rows = db.prepare('SELECT tb.* FROM thingsboard_devices tb JOIN custom_tag_tb_devices m ON tb.id = m.tb_device_id WHERE m.custom_tag_id=? ORDER BY tb.sort_order, tb.id').all(req.params.id);
-  res.json(rows);
-});
-
-app.post('/api/custom-tags/:id/tb-devices', (req, res) => {
-  const ct = db.prepare('SELECT id FROM custom_tags WHERE id=?').get(req.params.id);
-  if (!ct) return res.status(404).json({ error: 'Không tìm thấy CustomTag' });
-  const { tb_device_id } = req.body;
-  if (!tb_device_id) return res.status(400).json({ error: 'Thiếu tb_device_id' });
-  db.prepare('INSERT OR IGNORE INTO custom_tag_tb_devices (custom_tag_id, tb_device_id) VALUES (?,?)').run(req.params.id, tb_device_id);
-  res.json({ ok: true });
-});
-
-app.delete('/api/custom-tags/:id/tb-devices/:tbId', (req, res) => {
-  db.prepare('DELETE FROM custom_tag_tb_devices WHERE custom_tag_id=? AND tb_device_id=?').run(req.params.id, req.params.tbId);
-  res.json({ ok: true });
-});
-
-app.get('/api/custom-tags/sources/available', (req, res) => {
-  const tags = db.prepare('SELECT id, name, device_id FROM tags ORDER BY name').all();
-  const devices = db.prepare('SELECT id, name FROM devices ORDER BY name').all();
-  const channels = db.prepare('SELECT id, name FROM channels ORDER BY name').all();
-  const devMap = new Map(devices.map(d => [d.id, d]));
-  const chMap = new Map(channels.map(c => [c.id, c]));
-  const tagOptions = tags.map(t => {
-    const dev = devMap.get(t.device_id);
-    const ch = dev ? chMap.get(dev.channel_id) : null;
-    const fullName = ch && dev ? `${ch.name}.${dev.name}.${t.name}` : t.name;
-    return { type: 'tag', id: t.id, name: t.name, fullName };
-  });
-  const apiKeys = db.prepare('SELECT DISTINCT api_key FROM api_tb_mappings').all().map(r => r.api_key);
-  const customTags = db.prepare('SELECT id, name FROM custom_tags ORDER BY name').all().map(ct => ({ type: 'custom_tag', id: ct.id, name: ct.name, fullName: ct.name }));
-  res.json({ tags: tagOptions, apiKeys, customTags });
-});
-
-app.get('/api/custom-tags/live-values', (req, res) => {
-  const rows = db.prepare('SELECT id, name, expression, decimals FROM custom_tags').all();
-  const out = rows.map(r => ({ id: r.id, name: r.name, value: customTagValueCache.get(r.id), decimals: r.decimals }));
-  res.json(out);
-});
-
-// ---------- THINGSBOARD UPLOAD SERVICE ----------
-const tbLastTelemetry = new Map();
-const tbLastAttributes = new Map();
+require('./routes/auth')(app, db);
+require('./routes/users')(app, db);
+require('./routes/channels')(app, db, helpers);
+require('./routes/devices')(app, db, helpers);
+require('./routes/tags')(app, db);
+require('./routes/thingsboard')(app, db);
+require('./routes/custom-tags')(app, db, helpers);
+require('./routes/api')(app, db);
+require('./routes/misc')(app, db, helpers);
 
 async function uploadToThingsBoard(tbDevice, tags, isAttributes) {
   if (!tbDevice.enabled || !tags.length) return;
@@ -957,14 +116,13 @@ async function uploadToThingsBoard(tbDevice, tags, isAttributes) {
     else if (typeof value === 'number' && (!Number.isFinite(value))) return;
     let key = sanitizeTbKey(`${tag.channel_name || ''}_${tag.device_name || ''}_${tag.name}`);
     if (!key) key = `tag_${tag.id}`;
-    // Nếu 2 tag khác nhau vẫn cho ra cùng 1 key sau khi sanitize (trùng tên sau khi
-    // bỏ dấu/ký tự đặc biệt), thêm hậu tố id để không bị đè giá trị lên nhau.
     if (Object.prototype.hasOwnProperty.call(payload, key)) key = `${key}_${tag.id}`;
     payload[key] = value;
   });
   if (!Object.keys(payload).length) return;
 
   try {
+    const axios = require('axios');
     const response = await axios.post(url, payload, { timeout: tbDevice.request_timeout_ms || 5000 });
     console.log(`[TB] Upload ${isAttributes ? 'attributes' : 'telemetry'} ${Object.keys(payload).length} tag to ${tbDevice.name} OK`);
   } catch (err) {
@@ -978,9 +136,6 @@ async function uploadToThingsBoard(tbDevice, tags, isAttributes) {
   }
 }
 
-// Chạy tối đa `limit` tác vụ song song (dùng để đọc nhiều device Modbus cùng lúc -
-// mỗi device là 1 socket riêng nên đọc song song an toàn, chỉ cần đọc tuần tự BÊN TRONG
-// 1 device vì Modbus TCP không hỗ trợ nhiều giao dịch song song trên cùng 1 socket).
 async function mapWithConcurrency(items, limit, fn) {
   let idx = 0;
   async function worker() {
@@ -993,13 +148,9 @@ async function mapWithConcurrency(items, limit, fn) {
   await Promise.all(workers);
 }
 
-const DEVICE_READ_CONCURRENCY = 8; // số device đọc Modbus song song trong 1 chu kỳ
+const DEVICE_READ_CONCURRENCY = 8;
 
 const tagColumnsForTb = 't.id, t.name, t.device_id, t.address, t.data_type, t.decimals, t.scaling_type, t.raw_json, d.name as device_name, ch.name as channel_name';
-// Lấy tag cần gửi lên 1 thiết bị TB cụ thể: bao gồm CẢ 2 nguồn
-//  (1) gán riêng từng tag qua bảng tag_tb_devices (cách cũ), VÀ
-//  (2) gán 1 lần ở cấp Device (devices.default_tb_device_id) - tag chỉ cần bật
-//      Telemetry/Attributes là tự động được gửi, không cần gán riêng nữa.
 const tbTelemetryTagsStmt = db.prepare(`
   SELECT DISTINCT ${tagColumnsForTb}
   FROM tags t
@@ -1018,15 +169,6 @@ const tbAttributesTagsStmt = db.prepare(`
 `);
 const deviceByIdStmt = db.prepare('SELECT * FROM devices WHERE id=?');
 
-/**
- * 1 chu kỳ gửi dữ liệu lên ThingsBoard:
- * - Chỉ xử lý các thiết bị TB đã tới hạn gửi telemetry/attributes theo interval riêng.
- * - Gộp toàn bộ tag cần đọc theo device (tránh đọc 2 lần nếu 1 tag vừa dùng cho
- *   telemetry vừa dùng cho attributes, hoặc được map tới nhiều thiết bị TB).
- * - Đọc các device song song (giới hạn concurrency), mỗi device tự gộp lệnh Modbus
- *   bên trong (xem readTagsBatch trong modbus-client.js).
- * - Gửi lên ThingsBoard song song sau khi đã có đủ giá trị.
- */
 async function processThingsBoardUploads() {
   try {
     const tbDevices = db.prepare('SELECT * FROM thingsboard_devices WHERE enabled=1 ORDER BY sort_order, id').all();
@@ -1037,8 +179,8 @@ async function processThingsBoardUploads() {
     const dueAttributesTb = tbDevices.filter((tb) => now - (tbLastAttributes.get(tb.id) || 0) >= (tb.attributes_interval_ms || 5000));
     if (!dueTelemetryTb.length && !dueAttributesTb.length) return;
 
-    const deviceTagMap = new Map(); // deviceId -> Map(tagId -> tag row)
-    const telemetryPlan = new Map(); // tb.id -> tag rows
+    const deviceTagMap = new Map();
+    const telemetryPlan = new Map();
     const attributesPlan = new Map();
 
     const collect = (tb, rows, plan) => {
@@ -1061,13 +203,12 @@ async function processThingsBoardUploads() {
 
     if (!deviceTagMap.size) return;
 
-    // Đọc mỗi device đúng 1 lần cho chu kỳ này, song song có giới hạn
-    const readResults = new Map(); // deviceId -> { tagId: {value,...} }
+    const readResults = new Map();
     await mapWithConcurrency([...deviceTagMap.entries()], DEVICE_READ_CONCURRENCY, async ([deviceId, tagMap]) => {
       const dev = deviceByIdStmt.get(deviceId);
       if (!dev || !dev.ip) return;
       try {
-        const values = await readTagsForDevice(dev, [...tagMap.values()]);
+        const values = await require('./modbus-client').readTagsForDevice(dev, [...tagMap.values()]);
         readResults.set(deviceId, values);
         Object.entries(values || {}).forEach(([tagId, result]) => {
           if (result && result.value != null) {
@@ -1079,7 +220,6 @@ async function processThingsBoardUploads() {
       }
     });
 
-    // Gửi lên ThingsBoard song song dựa trên kết quả đã đọc
     const uploadJobs = [];
     telemetryPlan.forEach((rows, tbId) => {
       const tb = tbDevices.find((d) => d.id === tbId);
@@ -1120,7 +260,6 @@ async function processThingsBoardUploads() {
   }
 }
 
-// ---------- API TO THINGSBOARD UPLOAD SERVICE ----------
 const apiTbLastTelemetry = new Map();
 const apiTbLastAttributes = new Map();
 const API_TB_CYCLE_INTERVAL_MS = 1000;
@@ -1133,6 +272,7 @@ async function uploadApiDataToThingsBoard(tbDevice, apiKey, value, isAttributes)
   const sanitizedKey = sanitizeTbKey(apiKey);
   const payload = { [sanitizedKey]: value };
   try {
+    const axios = require('axios');
     await axios.post(url, payload, { timeout: tbDevice.request_timeout_ms || 5000 });
     console.log(`[API-TB] Upload ${apiKey} to ${tbDevice.name} (${isAttributes ? 'attributes' : 'telemetry'}) OK`);
   } catch (err) {
@@ -1152,6 +292,7 @@ async function processApiThingsBoardUploads() {
     if (!mappings.length) return;
 
     const configs = getApiFetchConfigs();
+    const { fetchCleanWaterLive, fetchRawWaterLive, fetchViwaterLive } = require('./live_fetchers');
     const [cleanWater, rawWater, viwater] = await Promise.all([
       fetchCleanWaterLive(configs.clean_water?.fetch_interval_ms || 10000),
       fetchRawWaterLive(configs.raw_water?.fetch_interval_ms || 10000),
@@ -1218,6 +359,8 @@ function startApiThingsBoardService() {
   apiTbLoopTick();
 }
 
+const { compile } = require('./expression-engine');
+
 async function evaluateCustomTags() {
   try {
     const tags = db.prepare('SELECT * FROM custom_tags WHERE realtime_enabled=1 OR tb_telemetry_enabled=1 OR tb_attributes_enabled=1').all();
@@ -1268,9 +411,8 @@ function startCustomTagService() {
   customTagLoopTick();
 }
 
-// Tự lên lịch lại SAU KHI chu kỳ trước xử lý xong, thay vì setInterval cố định -
-// tránh chồng chéo (overlap) nhiều chu kỳ chạy song song khi có hàng nghìn tag khiến
-// 1 chu kỳ mất hơn 1 giây.
+const tbLastTelemetry = new Map();
+const tbLastAttributes = new Map();
 const TB_CYCLE_INTERVAL_MS = 1000;
 let tbLoopTimer = null;
 async function tbLoopTick() {
@@ -1299,7 +441,7 @@ function shutdown() {
   if (tbLoopTimer) clearTimeout(tbLoopTimer);
   if (customTagLoopTimer) clearTimeout(customTagLoopTimer);
   if (apiTbLoopTimer) clearTimeout(apiTbLoopTimer);
-  closeAll();
+  require('./modbus-client').closeAll();
   process.exit(0);
 }
 process.on('SIGINT', shutdown);
