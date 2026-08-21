@@ -122,9 +122,10 @@ CREATE TABLE IF NOT EXISTS custom_tags (
 CREATE TABLE IF NOT EXISTS custom_tag_sources (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   custom_tag_id INTEGER NOT NULL REFERENCES custom_tags(id) ON DELETE CASCADE,
-  source_type TEXT NOT NULL CHECK(source_type IN ('tag','api_key')),
+  source_type TEXT NOT NULL CHECK(source_type IN ('tag','api_key','custom_tag')),
   source_tag_id INTEGER REFERENCES tags(id) ON DELETE SET NULL,
   source_api_key TEXT,
+  source_custom_tag_id INTEGER REFERENCES custom_tags(id) ON DELETE SET NULL,
   sort_order INTEGER DEFAULT 0
 );
 
@@ -244,7 +245,10 @@ ensureColumn('devices', 'default_tb_device_id', 'INTEGER');
       source_custom_tag_id INTEGER REFERENCES custom_tags(id) ON DELETE SET NULL,
       sort_order INTEGER DEFAULT 0
     )`);
-    db.exec(`INSERT INTO custom_tag_sources_new SELECT id, custom_tag_id, source_type, source_tag_id, source_api_key, source_custom_tag_id, sort_order FROM custom_tag_sources`);
+    const srcCols = db.prepare("PRAGMA table_info(custom_tag_sources)").all().map(c => c.name);
+    const hasCustomCol = srcCols.includes('source_custom_tag_id');
+    const srcCustomColSql = hasCustomCol ? 'source_custom_tag_id' : 'NULL';
+    db.exec(`INSERT INTO custom_tag_sources_new SELECT id, custom_tag_id, source_type, source_tag_id, source_api_key, ${srcCustomColSql}, sort_order FROM custom_tag_sources`);
     db.exec('DROP TABLE custom_tag_sources');
     db.exec('ALTER TABLE custom_tag_sources_new RENAME TO custom_tag_sources');
   } else {

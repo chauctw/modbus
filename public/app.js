@@ -71,7 +71,7 @@ function logout() {
   window.location.href = '/login.html';
 }
 
-function closeModal() { modalRoot.innerHTML = ''; }
+function closeModal() { modalRoot.innerHTML = ''; const picker = document.getElementById('picker-float'); if (picker) picker.remove(); }
 function openModal(html) {
   modalRoot.innerHTML = `<div class="modal-backdrop" id="backdrop"><div class="modal">${html}</div></div>`;
   $('#backdrop').addEventListener('click', (e) => { if (e.target.id === 'backdrop') closeModal(); });

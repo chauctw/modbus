@@ -11,7 +11,7 @@ module.exports = function register(app, db, helpers) {
     const info = db.prepare(
       `INSERT INTO custom_tags (name, expression, decimals, sort_order, realtime_enabled, tb_telemetry_enabled, tb_telemetry_interval_ms, tb_attributes_enabled, tb_attributes_interval_ms, raw_json) VALUES (?,?,?,?,?,?,?,?,?,?)`
     ).run(name, expression, Number.isInteger(decimals) ? decimals : 2, maxOrder + 1, realtime_enabled ? 1 : 0, tb_telemetry_enabled ? 1 : 0, Number.isInteger(tb_telemetry_interval_ms) ? tb_telemetry_interval_ms : 5000, tb_attributes_enabled ? 1 : 0, Number.isInteger(tb_attributes_interval_ms) ? tb_attributes_interval_ms : 5000, JSON.stringify({ name, expression }));
-    res.json({ id: info.lastInsertRowid });
+    res.json({ id: Number(info.lastInsertRowid) });
   });
 
   app.put('/api/custom-tags/:id', (req, res) => {
@@ -57,7 +57,7 @@ module.exports = function register(app, db, helpers) {
     const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),-1) m FROM custom_tag_sources WHERE custom_tag_id=?').get(req.params.id).m;
     const info = db.prepare('INSERT INTO custom_tag_sources (custom_tag_id, source_type, source_tag_id, source_api_key, source_custom_tag_id, sort_order) VALUES (?,?,?,?,?,?)')
       .run(req.params.id, source_type, source_tag_id || null, source_api_key || null, source_custom_tag_id || null, maxOrder + 1);
-    res.json({ id: info.lastInsertRowid });
+    res.json({ id: Number(info.lastInsertRowid) });
   });
 
   app.delete('/api/custom-tags/:id/sources/:sid', (req, res) => {
@@ -86,7 +86,7 @@ module.exports = function register(app, db, helpers) {
 
   app.get('/api/custom-tags/sources/available', (req, res) => {
     const tags = db.prepare('SELECT id, name, device_id FROM tags ORDER BY name').all();
-    const devices = db.prepare('SELECT id, name FROM devices ORDER BY name').all();
+    const devices = db.prepare('SELECT id, name, channel_id FROM devices ORDER BY name').all();
     const channels = db.prepare('SELECT id, name FROM channels ORDER BY name').all();
     const devMap = new Map(devices.map(d => [d.id, d]));
     const chMap = new Map(channels.map(c => [c.id, c]));
@@ -94,10 +94,17 @@ module.exports = function register(app, db, helpers) {
       const dev = devMap.get(t.device_id);
       const ch = dev ? chMap.get(dev.channel_id) : null;
       const fullName = ch && dev ? `${ch.name}.${dev.name}.${t.name}` : t.name;
-      return { type: 'tag', id: t.id, name: t.name, fullName };
+      const ref = ch && dev
+        ? helpers.makeTagRef(ch.name, dev.name, t.name, t.id)
+        : helpers.makeTagRef('', '', t.name, t.id);
+      return { type: 'tag', id: t.id, name: t.name, fullName, ref };
     });
-    const apiKeys = db.prepare('SELECT DISTINCT api_key FROM api_tb_mappings').all().map(r => r.api_key);
-    const customTags = db.prepare('SELECT id, name FROM custom_tags ORDER BY name').all().map(ct => ({ type: 'custom_tag', id: ct.id, name: ct.name, fullName: ct.name }));
+    const dbApiKeys = db.prepare('SELECT DISTINCT api_key FROM api_tb_mappings').all().map(r => r.api_key);
+    const apiKeys = [...new Set([...dbApiKeys, ...helpers.getKnownApiKeys()])];
+    const customTags = db.prepare('SELECT id, name FROM custom_tags ORDER BY name').all().map(ct => {
+      const ref = helpers.makeCustomTagRef(ct.name, ct.id);
+      return { type: 'custom_tag', id: ct.id, name: ct.name, fullName: ct.name, ref };
+    });
     res.json({ tags: tagOptions, apiKeys, customTags });
   });
 

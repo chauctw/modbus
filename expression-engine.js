@@ -10,7 +10,7 @@ const TokenType = {
 
 const RE = {
   [TokenType.NUMBER]: /^-?\d+(?:\.\d+)?/,
-  [TokenType.IDENT]: /^[A-Za-z_][A-Za-z0-9_\.]*/,
+  [TokenType.IDENT]: /^[^\s+\-*/(),]+/,
   [TokenType.OP]: /^[+\-*/]/,
   [TokenType.LPAREN]: /^\(/,
   [TokenType.RPAREN]: /^\)/,

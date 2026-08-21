@@ -73,6 +73,72 @@ async function saveCustomTagInlineEdit(id, tr) {
   } catch (e) { alert(e.message); await loadCustomTags(); }
 }
 
+function showPickerFloating(triggerBtn, title, items, getLabel, getValue) {
+  return new Promise((resolve) => {
+    const existing = document.getElementById('picker-float');
+    if (existing) existing.remove();
+    if (!items.length) {
+      alert('Không có mục nào để chọn');
+      resolve(null);
+      return;
+    }
+    if (!triggerBtn || typeof triggerBtn.getBoundingClientRect !== 'function') {
+      resolve(null);
+      return;
+    }
+    const valOf = getValue || getLabel;
+    const rect = triggerBtn.getBoundingClientRect();
+    const panel = document.createElement('div');
+    panel.id = 'picker-float';
+    panel.style.cssText = `
+      position: fixed;
+      top: ${rect.bottom + 4}px;
+      left: ${rect.left}px;
+      width: 320px;
+      max-height: 300px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-lg);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    `;
+    panel.innerHTML = `
+      <div style="padding: 8px 12px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 13px; background: var(--panel-2); color: var(--text);">${escapeHtml(title)}</div>
+      <input type="text" id="picker-search" placeholder="Tìm kiếm..." style="width: 100%; padding: 6px 10px; border: none; border-bottom: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 13px; outline: none;" />
+      <div id="picker-list" style="flex: 1; overflow-y: auto; max-height: 240px;">
+        ${items.map(item => `<div class="picker-item" data-value="${escapeHtml(valOf(item))}" title="${escapeHtml(getLabel(item))}">${escapeHtml(getLabel(item))}</div>`).join('')}
+      </div>
+    `;
+    document.body.appendChild(panel);
+    const search = panel.querySelector('#picker-search');
+    const list = panel.querySelector('#picker-list');
+    const close = (value) => { panel.remove(); resolve(value); };
+    list.querySelectorAll('.picker-item').forEach(el => {
+      el.addEventListener('click', () => close(el.dataset.value));
+    });
+    if (search) {
+      search.addEventListener('input', (e) => {
+        const q = e.target.value.toLowerCase();
+        list.querySelectorAll('.picker-item').forEach(el => {
+          el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none';
+        });
+      });
+    }
+    setTimeout(() => {
+      document.addEventListener('click', function outside(e) {
+        if (panel.parentNode && !panel.contains(e.target) && e.target !== triggerBtn) {
+          panel.remove();
+          document.removeEventListener('click', outside);
+          resolve(null);
+        }
+      });
+    }, 0);
+  });
+}
+
 async function openCustomTagForm(ct = null) {
   const isEdit = !!ct;
   const sources = isEdit ? await api(`/api/custom-tags/${ct.id}/sources`) : [];
@@ -121,20 +187,23 @@ async function openCustomTagForm(ct = null) {
     ta.selectionStart = ta.selectionEnd = start + text.length;
   };
 
-  $('#insTag').onclick = async () => {
+  $('#insTag').onclick = async (e) => {
+    const btn = e.currentTarget;
     const available = await api('/api/custom-tags/sources/available');
-    const pick = prompt('Chọn tag (dán tên đầy đủ):\n' + available.tags.map(t => t.fullName).join('\n'));
-    if (pick) insertAtCursor(pick.trim());
+    const pick = await showPickerFloating(btn, 'Chọn tag (Kênh.Thiết bị.Tag)', available.tags, t => t.fullName, t => t.ref);
+    if (pick) insertAtCursor(pick);
   };
-  $('#insApi').onclick = async () => {
+  $('#insApi').onclick = async (e) => {
+    const btn = e.currentTarget;
     const available = await api('/api/custom-tags/sources/available');
-    const pick = prompt('Chọn API key (dán tên):\n' + available.apiKeys.join('\n'));
-    if (pick) insertAtCursor(pick.trim());
+    const pick = await showPickerFloating(btn, 'Chọn API key', available.apiKeys, k => k, k => k);
+    if (pick) insertAtCursor(pick);
   };
-  $('#insCustom').onclick = async () => {
+  $('#insCustom').onclick = async (e) => {
+    const btn = e.currentTarget;
     const available = await api('/api/custom-tags/sources/available');
-    const pick = prompt('Chọn CustomTag (dán tên):\n' + available.customTags.map(c => c.fullName).join('\n'));
-    if (pick) insertAtCursor(pick.trim());
+    const pick = await showPickerFloating(btn, 'Chọn CustomTag', available.customTags, c => c.fullName, c => c.ref);
+    if (pick) insertAtCursor(pick);
   };
 
   $('#save').onclick = async () => {
@@ -163,18 +232,18 @@ async function openCustomTagForm(ct = null) {
       }).filter(Boolean));
 
       const desiredRefs = new Set();
-      const tagNameToId = new Map(available.tags.map(t => [t.fullName, t.id]));
-      const apiNameToKey = new Map(available.apiKeys.map(k => [k, k]));
-      const customNameToId = new Map(available.customTags.map(c => [c.fullName, c.id]));
+      const tagRefToId = new Map(available.tags.map(t => [t.ref, t.id]));
+      const apiKeySet = new Set(available.apiKeys);
+      const customRefToId = new Map(available.customTags.map(c => [c.ref, c.id]));
 
-      const tokens = expression.split(/[+\-*/()]+/).map(t => t.trim()).filter(Boolean);
+      const tokens = expression.split(/[+\-*/(),]+/).map(t => t.trim()).filter(Boolean);
       tokens.forEach(token => {
-        if (apiNameToKey.has(token)) {
-          desiredRefs.add(`api:${apiNameToKey.get(token)}`);
-        } else if (customNameToId.has(token)) {
-          desiredRefs.add(`custom:${customNameToId.get(token)}`);
-        } else if (tagNameToId.has(token)) {
-          desiredRefs.add(`tag:${tagNameToId.get(token)}`);
+        if (apiKeySet.has(token)) {
+          desiredRefs.add(`api:${token}`);
+        } else if (customRefToId.has(token)) {
+          desiredRefs.add(`custom:${customRefToId.get(token)}`);
+        } else if (tagRefToId.has(token)) {
+          desiredRefs.add(`tag:${tagRefToId.get(token)}`);
         }
       });
 

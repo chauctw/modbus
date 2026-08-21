@@ -16,6 +16,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'kepware-tag-manager-secret-2026';
 
 const tagValueCache = new Map();
 const customTagValueCache = new Map();
+const apiKeysKnown = new Set();
 
 function authenticate(req, res, next) {
   const publicPaths = ['/api/auth/login', '/api/health', '/api/import', '/api/import-json'];
@@ -54,6 +55,23 @@ function sanitizeTbKey(key) {
   return noTone.replace(/[^a-zA-Z0-9_\-\.]/g, '_').replace(/[_\-\.]+/g, '_').replace(/^_|_$/g, '');
 }
 
+// Sinh định danh an toàn để dùng làm tên biến trong biểu thức custom tag.
+// Chỉ giữ lại chữ/số/dấu chấm/gạch dưới, thay thế mọi ký tự khác (khoảng trắng,
+// gạch ngang, dấu gạch chéo...) bằng '_' để tránh bị expression-engine tách nhầm.
+function exprSafe(str) {
+  return String(str == null ? '' : str).replace(/[^a-zA-Z0-9_.]/g, '_');
+}
+
+// Định danh duy nhất cho 1 tag Modbus: channel.device.tag.ID (ID đảm bảo không trùng)
+function makeTagRef(channelName, deviceName, tagName, tagId) {
+  return `${exprSafe(channelName)}.${exprSafe(deviceName)}.${exprSafe(tagName)}.${tagId}`;
+}
+
+// Định danh duy nhất cho 1 custom tag: name.ID
+function makeCustomTagRef(name, id) {
+  return `${exprSafe(name)}.${id}`;
+}
+
 function channelWithCounts(ch) {
   const devCount = db.prepare('SELECT COUNT(*) c FROM devices WHERE channel_id=?').get(ch.id).c;
   const tagCount = db.prepare(
@@ -87,6 +105,10 @@ const helpers = {
   channelWithCounts,
   deviceWithCounts,
   sanitizeTbKey,
+  exprSafe,
+  makeTagRef,
+  makeCustomTagRef,
+  getKnownApiKeys: () => [...apiKeysKnown],
   stripBom,
   getApiFetchConfigs,
   tagValueCache,
@@ -288,9 +310,6 @@ async function uploadApiDataToThingsBoard(tbDevice, apiKey, value, isAttributes)
 
 async function processApiThingsBoardUploads() {
   try {
-    const mappings = db.prepare('SELECT m.api_key, m.tb_device_id, m.telemetry_enabled, m.attributes_enabled, m.telemetry_interval_ms, m.attributes_interval_ms FROM api_tb_mappings m JOIN thingsboard_devices tb ON tb.id = m.tb_device_id WHERE tb.enabled=1').all();
-    if (!mappings.length) return;
-
     const configs = getApiFetchConfigs();
     const { fetchCleanWaterLive, fetchRawWaterLive, fetchViwaterLive } = require('./live_fetchers');
     const [cleanWater, rawWater, viwater] = await Promise.all([
@@ -306,8 +325,12 @@ async function processApiThingsBoardUploads() {
         const key = `${item.tag_name}_${metric}`;
         dataMap.set(key, value);
         tagValueCache.set(`api:${key}`, value);
+        apiKeysKnown.add(key);
       });
     });
+
+    const mappings = db.prepare('SELECT m.api_key, m.tb_device_id, m.telemetry_enabled, m.attributes_enabled, m.telemetry_interval_ms, m.attributes_interval_ms FROM api_tb_mappings m JOIN thingsboard_devices tb ON tb.id = m.tb_device_id WHERE tb.enabled=1').all();
+    if (!mappings.length) return;
 
     const now = Date.now();
     const tbDeviceIds = [...new Set(mappings.map(m => m.tb_device_id))];
@@ -382,14 +405,14 @@ async function evaluateCustomTags() {
         let refName = null;
         if (src.source_type === 'tag' && src.source_tag_id != null) {
           const info = tagInfoMap.get(src.source_tag_id);
-          refName = info ? `${info.channel_name}.${info.device_name}.${info.tag_name}` : `tag_${src.source_tag_id}`;
+          refName = info ? helpers.makeTagRef(info.channel_name, info.device_name, info.tag_name, src.source_tag_id) : `tag_${src.source_tag_id}`;
           ctx[refName] = tagValueCache.get(`tag:${src.source_tag_id}`);
         } else if (src.source_type === 'api_key' && src.source_api_key) {
           refName = src.source_api_key;
           ctx[refName] = tagValueCache.get(`api:${src.source_api_key}`);
         } else if (src.source_type === 'custom_tag' && src.source_custom_tag_id != null) {
           const cname = customTagNames.get(src.source_custom_tag_id);
-          refName = cname || `custom_${src.source_custom_tag_id}`;
+          refName = cname ? helpers.makeCustomTagRef(cname, src.source_custom_tag_id) : `custom_${src.source_custom_tag_id}`;
           ctx[refName] = customTagValueCache.get(src.source_custom_tag_id);
         }
       });

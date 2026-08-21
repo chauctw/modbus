@@ -8,6 +8,185 @@ Dữ liệu được lưu vào **SQLite** (`data/kepware.db`) ngay khi import, k
 - Frontend: HTML/JS thuần (không build step), gọi API để xem/sửa — chỉ dùng khi bạn *muốn* thao tác bằng giao diện
 - Import bằng UI **hoặc** bằng dòng lệnh (không cần trình duyệt) **hoặc** gọi API trực tiếp (script/cron)
 
+## Cấu trúc thư mục
+
+```
+modbus/
+├── server.js                  # Server Express chính, JWT auth, ThingsBoard orchestration
+├── db.js                      # SQLite init, schema, migrations
+├── package.json               # Scripts & dependencies
+├── ecosystem.config.js        # PM2 production config
+│
+├── routes/                    # API Routes
+│   ├── api.js                 # API fetch configs, mappings
+│   ├── auth.js                # Login, change-password
+│   ├── channels.js            # Channel CRUD
+│   ├── custom-tags.js         # Custom tag CRUD, sources, TB mapping
+│   ├── devices.js             # Device CRUD, duplicate, live-read/disconnect
+│   ├── misc.js                # Stats, validate, tree, datatypes, import/export, reset
+│   ├── tags.js                # Tag CRUD, bulk ops, TB mapping per tag
+│   ├── thingsboard.js         # TB device CRUD, stats
+│   └── users.js               # User CRUD (admin/editor/viewer)
+│
+├── kepware-io.js              # KEPServerEX JSON import/merge/export, round-trip raw_json
+├── import-cli.js              # CLI import (no server needed)
+├── modbus-client.js           # Modbus TCP pool, block read, decode, scaling, byte/word swap
+├── live_fetchers.js           # External API fetchers (Clean Water, Raw Water, Viwater)
+├── expression-engine.js       # Custom expression parser/AST/evaluator (abs/round/min/max)
+├── datatypes.js               # KEPServerEX data type codes, R/W constants, Modicon hints
+│
+├── public/                    # Frontend (vanilla HTML/JS/CSS, no build step)
+│   ├── index.html             # Main app shell (dashboard, tree, tables, modals)
+│   ├── login.html             # Login page
+│   ├── app.js                 # App init, global state, API helper, modal system
+│   ├── style.css              # Full CSS (TB PE theme, tables, modals, toggles)
+│   └── js/
+│       ├── tree.js            # Tree view: channels → devices → tag counts
+│       ├── tree-events.js     # Global handlers: add channel, add TB device, search
+│       ├── devices.js         # Device list, form, duplicate, TB device select
+│       ├── tags.js            # Tag table, inline edit, tag form (scaling), bulk ops
+│       ├── realtime.js        # Realtime Modbus polling, live cell updates
+│       ├── custom-tags.js     # Custom tag table, form, expression builder, TB mapping
+│       ├── live-fetch.js      # API fetch config, live fetch table, TB toggle
+│       ├── dashboard.js       # Dashboard stat cards (channels, devices, tags, dupes)
+│       ├── import-export.js   # Import (multipart), export download, reset DB
+│       └── auth.js            # Change password, user management UI
+│
+├── data/                      # Runtime data (gitignored except .gitkeep)
+│   └── kepware.db             # SQLite DB
+├── logs/                      # PM2 logs
+├── .NhaMay1.json              # Sample KEPServerEX config
+├── .HungPhu.json              # Sample KEPServerEX config
+└── README.md
+```
+
+## Phân nhóm theo chức năng (để AI biết chỉnh file nào khi điều chỉnh dự án)
+
+### Channel CRUD / Channel API
+- **Backend chính:** `routes/channels.js`
+- **Hỗ trợ:** `server.js` (`channelWithCounts`, `sanitizeTbKey`)
+- **Frontend:** `public/js/tree.js`, `public/js/tree-events.js`, `public/js/devices.js`
+
+### Device CRUD / Device API
+- **Backend chính:** `routes/devices.js`
+- **Hỗ trợ:** `server.js` (`deviceWithCounts`)
+- **Frontend:** `public/js/devices.js`, `public/js/tree.js`
+
+### Tag CRUD / Tag API
+- **Backend chính:** `routes/tags.js`
+- **Frontend:** `public/js/tags.js`, `public/js/realtime.js`
+
+### ThingsBoard Integration
+- **Backend chính:** `server.js` (`processThingsBoardUploads`, `uploadToThingsBoard`, `processApiThingsBoardUploads`)
+- **Routes:** `routes/thingsboard.js`, `routes/api.js`, `routes/tags.js` (per-tag TB mapping)
+- **Frontend:** `public/js/devices.js`, `public/js/tags.js`, `public/js/live-fetch.js`, `public/js/custom-tags.js`
+
+### Modbus Realtime Reading
+- **Backend chính:** `modbus-client.js` (connection pool, block read, decode, scaling, byte/word swap)
+- **Frontend:** `public/js/realtime.js`
+- **Hỗ trợ:** `server.js` (`readTagsForDevice`), `datatypes.js`
+
+### Import / Export KEPServerEX JSON
+- **Backend chính:** `kepware-io.js` (`importProject`, `mergeProject`, `exportProject`)
+- **CLI:** `import-cli.js`
+- **Routes:** `routes/misc.js` (`/api/import`, `/api/import-json`, `/api/export`)
+- **Frontend:** `public/js/import-export.js`
+
+### Custom Tags / Expression Engine
+- **Backend chính:** `expression-engine.js` (tokenizer, parser, evaluator)
+- **Routes:** `routes/custom-tags.js`
+- **Frontend:** `public/js/custom-tags.js`
+- **Hỗ trợ:** `server.js` (`evaluateCustomTags`)
+
+### External API Fetch (Live Fetch)
+- **Backend chính:** `live_fetchers.js` (Clean Water, Raw Water, Viwater)
+- **Routes:** `routes/api.js`, `routes/misc.js` (`/api/live-fetch`)
+- **Hỗ trợ:** `server.js` (`processApiThingsBoardUploads`)
+- **Frontend:** `public/js/live-fetch.js`
+
+### Database Schema
+- **Backend chính:** `db.js` (all table definitions, migrations)
+- **Phụ thuộc:** `kepware-io.js`, mọi `routes/*.js`
+
+### Frontend UI / Styling
+- **Layout:** `public/index.html`, `public/login.html`
+- **CSS:** `public/style.css`
+- **JS Core:** `public/app.js`, `public/js/tree.js`
+- **Feature JS:** `public/js/*.js`
+
+### Authentication / Users
+- **Backend:** `routes/auth.js`, `routes/users.js`, `server.js` (JWT middleware)
+- **Frontend:** `public/js/auth.js`, `public/login.html`
+
+## Luồng xử lý dữ liệu Channel (chi tiết)
+
+### Đi vào (Input)
+
+| Nguồn | Đường dẫn |
+|--------|-----------|
+| KEPServerEX JSON | `import-cli.js` → `kepware-io.js.importProject()` hoặc `mergeProject()` |
+| API multipart | `routes/misc.js` POST `/api/import` → `kepware-io.js` |
+| API JSON body | `routes/misc.js` POST `/api/import-json` → `kepware-io.js` |
+| CRUD thủ công | UI → `routes/channels.js` POST/PUT/DELETE |
+
+### Xử lý
+
+**Import REPLACE mode (`importProject`)**
+1. Xoá sạch `tags`, `devices`, `channels`, `project`
+2. Đọc `project.channels[]`
+3. Với mỗi channel:
+   - Trích xuất: `common.ALLTYPES_NAME`, `servermain.MULTIPLE_TYPES_DEVICE_DRIVER`, `modbus_ethernet.CHANNEL_ETHERNET_PORT_NUMBER`
+   - Lưu `raw_json` (đầy đủ KEPServerEX object, trừ `devices` array)
+   - `INSERT INTO channels`
+   - Với mỗi `channel.devices[]`:
+     - Parse `DEVICE_ID_STRING` (`<ip>.slaveId`)
+     - `INSERT INTO devices`
+     - Với mỗi `device.tags[]`:
+       - `INSERT INTO tags`
+
+**Import MERGE mode (`mergeProject`)**
+1. Không xoá dữ liệu cũ
+2. Khớp channel theo `NAME`
+   - Tồn tại → `UPDATE`
+   - Mới → `INSERT`
+3. Khớp device theo `channel_id + NAME`
+   - Tồn tại → `UPDATE`, xoá tag cũ, insert tag mới
+   - Mới → `INSERT` kèm tags
+4. Channel/device không khớp → giữ nguyên
+
+### Lưu trữ
+
+**SQLite: `data/kepware.db`**
+
+```
+project (id, title, extra_json)
+    └── channels (id, name, driver, port, sort_order, raw_json)
+            └── devices (id, channel_id → channels.id, name, ip, slave_id,
+                         scan_rate_ms, conn_timeout_s, req_time_ms,
+                         byte_swap, word_swap, default_tb_device_id, raw_json)
+                    └── tags (id, device_id → devices.id, name, address, data_type,
+                              rw_access, scaling_type, sort_order, decimals,
+                              realtime_enabled, tb_telemetry_enabled,
+                              tb_telemetry_interval_ms, tb_attributes_enabled,
+                              tb_attributes_interval_ms, raw_json)
+```
+
+- `ON DELETE CASCADE`: xoá channel → xoá devices → xoá tags
+- `raw_json` trên mọi table giữ nguyên toàn bộ field KEPServerEX để export round-trip
+
+### Đầu ra (Output)
+
+| Đích | Luồng |
+|------|--------|
+| **Frontend Tree** | `GET /api/tree` → `channels` + `devices` + `COUNT(tags)` → `public/js/tree.js` render |
+| **Frontend Channel List** | `GET /api/channels` → `channelWithCounts` |
+| **Frontend Device List** | `GET /api/devices/:id` + `GET /api/devices/:deviceId/tags` |
+| **ThingsBoard Upload** | `tbLoopTick()` mỗi 1s → JOIN channels-devices-tags → đọc Modbus → `uploadToThingsBoard()` |
+| **API Fetch → ThingsBoard** | `apiTbLoopTick()` mỗi 1s → `live_fetchers.js` → normalize → `uploadApiDataToThingsBoard()` |
+| **Export JSON** | `GET /api/export` → `kepware-io.js.exportProject()` → reconstruct KEPServerEX JSON |
+
+---
+
 ## 1. Cài đặt trên server Linux
 
 ```bash
@@ -39,7 +218,7 @@ npm run pm2:stop
 
 Mặc định server nghe ở cổng `3000`. Đổi cổng bằng biến môi trường `PORT` trong `ecosystem.config.js`.
 
-## 3. Import file JSON — 3 cách, 2 chế độ
+## 4. Import file JSON — 3 cách, 2 chế độ
 
 ### ⚠️ Chế độ import: Thay thế vs Gộp thêm
 - **Thay thế (replace, mặc định)**: xoá sạch toàn bộ channel/device/tag hiện có, chỉ giữ lại đúng
@@ -81,7 +260,7 @@ Mở `http://<ip-server>:3000` → nút **Import JSON**. Nếu hệ thống đã
 channels/devices/tags cũ, nạp lại từ đầu) để đảm bảo đồng bộ 1-1 với file KEPServerEX. Trước khi import
 đè, nên **Export** để sao lưu lại nếu cần.
 
-## 4. Export lại đúng định dạng KEPServerEX
+## 5. Export lại đúng định dạng KEPServerEX
 ```bash
 curl -o export.json http://localhost:3000/api/export
 ```
@@ -89,7 +268,7 @@ Hoặc bấm nút **Export JSON** trên giao diện. Mọi field không được
 `client_interfaces`, `mbeglobaldata`, v.v.) được giữ nguyên 1-1 vì mỗi channel/device/tag đều lưu kèm
 `raw_json` gốc trong DB.
 
-## 5. Cấu trúc DB (SQLite)
+## 6. Cấu trúc DB (SQLite)
 - `project` — tiêu đề + các field cấp project không được UI xử lý (`client_interfaces`, `mbeglobaldata`...)
 - `channels` — 1 dòng / channel, có `raw_json` đầy đủ để round-trip
 - `devices` — 1 dòng / device, có `ip`, `slave_id` tách riêng từ `DEVICE_ID_STRING`, có `raw_json`
@@ -98,7 +277,7 @@ Hoặc bấm nút **Export JSON** trên giao diện. Mọi field không được
 File DB nằm ở `data/kepware.db`. Sao lưu bằng cách copy file này (dừng service hoặc dùng
 `sqlite3 data/kepware.db ".backup data/backup.db"` để backup an toàn khi đang chạy).
 
-## 6. API chính (tham khảo nhanh)
+## 7. API chính (tham khảo nhanh)
 | Method | Endpoint | Mô tả |
 |---|---|---|
 | POST | `/api/import` (multipart `file`) | Import JSON, thay thế toàn bộ DB |
@@ -115,7 +294,7 @@ File DB nằm ở `data/kepware.db`. Sao lưu bằng cách copy file này (dừn
 | POST | `/api/tags/bulk-delete`, `/api/tags/bulk-update` | Xoá/sửa hàng loạt |
 | GET | `/api/tree` | Cây channel → device → số lượng tag |
 
-## 7. Xem giá trị Tag Realtime (đọc thật từ PLC qua Modbus TCP)
+## 8. Xem giá trị Tag Realtime (đọc thật từ PLC qua Modbus TCP)
 
 Khi mở bảng tag của 1 device, bấm **▶ Bật Realtime** để app kết nối Modbus TCP thật tới
 IP của device đó (cổng lấy từ field `modbus_ethernet.DEVICE_ETHERNET_PORT_NUMBER`, mặc định 502)
@@ -159,23 +338,12 @@ API liên quan:
 | POST | `/api/devices/:id/live-read` (body `{tagIds:[...]}`) | Đọc giá trị realtime của các tag chỉ định |
 | POST | `/api/devices/:id/live-disconnect` | Ngắt kết nối Modbus TCP tới device |
 
-## 8. Ghi chú khác
+## 9. Ghi chú khác
 - Đây là công cụ soạn thảo cấu hình + xem realtime; **không** ghi giá trị xuống PLC, không có chức năng điều khiển.
 - Bảng mã `TAG_DATA_TYPE` theo quy ước KEPServerEX: xem `datatypes.js`.
 
 
 
-function Show-Tree {
-    param(
-        [string]$Path = ".",
-        [string]$Indent = ""
-    )
 
-    Get-ChildItem $Path | Where-Object { $_.Name -ne "node_modules" } | ForEach-Object {
-        Write-Output "$Indent|-- $($_.Name)"
-        if ($_.PSIsContainer) {
-            Show-Tree $_.FullName ($Indent + "|   ")
-        }
-    }
-}
-Show-Tree | Out-File structure.txt -Encoding utf8
+
+Fix custom tag insertion bugs
