@@ -25,54 +25,14 @@ function openChangePasswordModal() {
   };
 }
 
-let userManagementVisible = false;
 
-async function loadUsers() {
-  if (!userManagementVisible) return;
-  try {
-    const users = await api('/api/users');
-    renderUserList(users);
-  } catch (e) {
-    console.error('Failed to load users:', e);
-  }
-}
-
-function renderUserList(users) {
-  const tbody = $('#userTableBody');
-  if (!tbody) return;
-  tbody.innerHTML = '';
-  users.forEach((u) => {
-    const tr = document.createElement('tr');
-    tr.dataset.id = u.id;
-    tr.innerHTML = `
-      <td>${u.id}</td>
-      <td>${escapeHtml(u.username)}</td>
-      <td><span class="badge ${u.role === 'admin' ? 'on' : ''}">${u.role}</span></td>
-      <td class="muted">${u.created_at || '-'}</td>
-      <td class="muted">${u.updated_at || '-'}</td>
-      <td><div class="row-actions">
-        <button class="icon-btn edit-btn" title="Sửa quyền">⚙</button>
-        <button class="icon-btn del-btn" title="Xoá">🗑</button>
-      </div></td>
-    `;
-    tbody.appendChild(tr);
-    tr.querySelector('.edit-btn').addEventListener('click', () => openUserForm(u));
-    tr.querySelector('.del-btn').addEventListener('click', async () => {
-      if (!confirm(`Xoá user "${u.username}"?`)) return;
-      try {
-        await api(`/api/users/${u.id}`, { method: 'DELETE' });
-        loadUsers();
-      } catch (e) { alert(e.message); }
-    });
-  });
-}
 
 function openUserForm(user = null) {
   const isEdit = !!user;
   openModal(`
     <h3>${isEdit ? 'Sửa' : 'Thêm'} Người dùng</h3>
-    <div class="field"><label>Tên đăng nhập</label><input id="f-username" value="${user ? escapeHtml(user.username) : ''}" ${isEdit ? 'disabled' : ''} /></div>
-    ${!isEdit ? `<div class="field"><label>Mật khẩu</label><input type="password" id="f-password" /></div>` : ''}
+    <div class="field"><label>Tên đăng nhập</label><input id="f-username" value="${user ? escapeHtml(user.username) : ''}" /></div>
+    <div class="field"><label>Mật khẩu</label><input type="password" id="f-password" placeholder="${isEdit ? 'Để trống nếu không đổi' : ''}" /></div>
     <div class="field">
       <label>Quyền</label>
       <select id="f-role">
@@ -83,7 +43,7 @@ function openUserForm(user = null) {
     </div>
     <div id="err" class="error-text"></div>
     <div class="modal-actions">
-      <button class="btn" onclick="closeModal()">Huỷ</button>
+      <button class="btn" onclick="closeModal(); showUserManagement();">Huỷ</button>
       <button class="btn btn-primary" id="save">Lưu</button>
     </div>
   `);
@@ -92,38 +52,73 @@ function openUserForm(user = null) {
     const role = $('#f-role').value;
     try {
       if (isEdit) {
-        await api(`/api/users/${user.id}`, { method: 'PUT', body: JSON.stringify({ role }) });
+        await api(`/api/users/${user.id}`, { method: 'PUT', body: JSON.stringify({ username, password: $('#f-password').value || undefined, role }) });
       } else {
         const password = $('#f-password').value;
         if (!username || !password) { $('#err').textContent = 'Thiếu username hoặc password'; return; }
         if (password.length < 6) { $('#err').textContent = 'Password phải có ít nhất 6 ký tự'; return; }
         await api('/api/users', { method: 'POST', body: JSON.stringify({ username, password, role }) });
       }
-      closeModal(); loadUsers();
+      closeModal(); showUserManagement();
     } catch (e) { $('#err').textContent = e.message; }
   };
+
+  // Override X close button to return to user management
+  const _closeBtn = modalRoot.querySelector(".modal-close-btn");
+  if (_closeBtn) _closeBtn.onclick = () => { closeModal(); showUserManagement(); };
 }
 
-function showUserManagement() {
-  userManagementVisible = true;
-  state.currentChannelId = '__users__';
-  state.currentDeviceId = null;
-  currentLiveSource = null;
-  expandedChannels.clear();
-  $('#emptyState').style.display = 'none';
-  $('#deviceHeader').style.display = 'none';
-  $('#userHeader').style.display = 'flex';
-  $('#tagToolbar').style.display = 'none';
-  $('#tagTableWrap').style.display = 'none';
-  $('#tagPagination').style.display = 'none';
-  $('#liveFetchConfigBar').style.display = 'none';
-  $('#liveFetchTableWrap').style.display = 'none';
-  $('#liveFetchPagination').style.display = 'none';
-  $('#tbDeviceTableWrap').style.display = 'none';
-  $('#tbDevicePagination').style.display = 'none';
-  $('#userTableWrap').style.display = 'block';
-  $('#userTitle').textContent = 'Quản lý người dùng';
-  $('#userMeta').textContent = `Đăng nhập: ${escapeHtml(getCurrentUser()?.username || '')} (${getCurrentUser()?.role || ''})`;
-  loadUsers();
-  renderTree();
+async function showUserManagement() {
+  try {
+    const users = await api('/api/users');
+    const rows = users.map((u, i) => `
+      <tr data-id="${u.id}">
+        <td>${i + 1}</td>
+        <td>${escapeHtml(u.username)}</td>
+        <td><span class="badge ${u.role === 'admin' ? 'on' : ''}">${u.role}</span></td>
+        <td class="muted">${u.created_at || '-'}</td>
+        <td class="muted">${u.updated_at || '-'}</td>
+        <td><div class="row-actions">
+          <button class="icon-btn edit-btn" data-uid="${u.id}" title="Sửa quyền">⚙</button>
+          <button class="icon-btn del-btn" data-uid="${u.id}" title="Xoá">🗑</button>
+        </div></td>
+      </tr>`).join('');
+    openModal(`
+      <h3>Quản lý người dùng</h3>
+      <div class="table-wrap user-mgmt-table-wrap">
+        <table id="userMgmtTable">
+          <thead>
+            <tr><th>STT</th><th>Tên đăng nhập</th><th>Quyền</th><th>Tạo lúc</th><th>Cập nhật</th><th>Thao tác</th></tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-primary" id="addUserBtn">+ Thêm người dùng</button>
+        <button class="btn" onclick="closeModal()">Đóng</button>
+      </div>
+    `, { className: "modal-wide" });
+    document.querySelectorAll('#userMgmtTable .edit-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const uid = btn.dataset.uid;
+        const user = users.find(u => String(u.id) === String(uid));
+        if (user) openUserForm(user);
+      });
+    });
+    document.querySelectorAll('#userMgmtTable .del-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const uid = btn.dataset.uid;
+        const user = users.find(u => String(u.id) === String(uid));
+        if (!confirm(`Xoá user "${user?.username}"?`)) return;
+        try {
+          await api(`/api/users/${uid}`, { method: 'DELETE' });
+          showUserManagement();
+        } catch (e) { alert(e.message); }
+      });
+    });
+    modalRoot.querySelector('#addUserBtn').addEventListener('click', () => openUserForm());
+  } catch (e) {
+    console.error('Failed to load users:', e);
+    alert('Không thể tải danh sách người dùng');
+  }
 }

@@ -98,6 +98,47 @@ modbus/
 - **Frontend:** `public/js/custom-tags.js`
 - **Hỗ trợ:** `server.js` (`evaluateCustomTags`)
 
+#### Cú pháp biểu thức Custom Tag
+
+Biểu thức hỗ trợ kết hợp **Tag Modbus**, **API Key** (Live Fetch), và **Custom Tag** khác.
+
+| Thành phầp | Ví dụ | Mô tả |
+|---|---|---|
+| Số (constant) | `2`, `1000`, `3.14` | Số nguyên hoặc thập phân |
+| Tag Modbus | `CANTHO1.CUM_1NS.Flow.5` | Tham chiếu tag theo dạng `Channel.Device.Tag.ID` |
+| API Key | `clean_water_flow` | Tên key từ Live Fetch (không chứa khoảng trắng/dấu câu) |
+| Custom Tag khác | `TagTinhTien.10` | Tham chiếu Custom Tag khác theo dạng `Name.ID` |
+| Phép toán | `+`, `-`, `*`, `/` | Cộng, trừ, nhân, chia |
+| Ngoặc | `(`, `)` | Độ ưu tiên tính toán |
+| Hàm | `abs()`, `round()`, `min()`, `max()` | Xem bảng hàm bên dưới |
+
+#### Các hàm hỗ trợ
+
+| Hàm | Ví dụ | Kết quả |
+|---|---|---|
+| `abs(x)` | `abs(flow - 100)` | Giá trị tuyệt đối |
+| `round(x, decimals)` | `round(flow / 1000, 2)` | Làm tròn đến N chữ số thập phân (mặc định 0) |
+| `min(a, b, ...)` | `min(flow, 100)` | Giá trị nhỏ nhất |
+| `max(a, b, ...)` | `max(flow, 0)` | Giá trị lớn nhất |
+
+#### Ví dụ biểu thức
+
+```
+flow_rate + pressure * 2
+(flow_in - flow_out) / 1000
+max(flow_a, flow_b) + min(flow_c, 100)
+abs(flow - round(flow, 0))
+round(total_volume, 2)
+tag1 + tag2 + tag3
+```
+
+**Lưu ý:**
+- Tên biến (tag ref, API key) **không được chứa khoảng trắng, dấu `+ - * / ( ) ,`**. Nếu tên tag Modbus chứa ký tự đặc biệt, hệ thống tự động thay bằng `_` khi tạo tham chiếu (ví dụ: `My-Tag` → `My_Tag`).
+- Biểu thức chia cho 0 trả về `null` (hiển thị `—`).
+- Bất kỳ toán hào nào `null` → kết quả cuối cùng là `null`.
+- Custom Tag có thể tham chiếu Custom Tag khác (không vòng lặp vô hạn — vòng lặp sẽ trả về `null`).
+- Hệ thống tự động phân tích biểu thức khi lưu để tạo/xóa `custom_tag_sources` tương ứng.
+
 ### External API Fetch (Live Fetch)
 - **Backend chính:** `live_fetchers.js` (Clean Water, Raw Water, Viwater)
 - **Routes:** `routes/api.js`, `routes/misc.js` (`/api/live-fetch`)
@@ -346,4 +387,3 @@ API liên quan:
 
 
 
-Fix custom tag insertion bugs

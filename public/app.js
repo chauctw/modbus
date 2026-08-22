@@ -72,9 +72,22 @@ function logout() {
 }
 
 function closeModal() { modalRoot.innerHTML = ''; const picker = document.getElementById('picker-float'); if (picker) picker.remove(); }
-function openModal(html) {
-  modalRoot.innerHTML = `<div class="modal-backdrop" id="backdrop"><div class="modal">${html}</div></div>`;
-  $('#backdrop').addEventListener('click', (e) => { if (e.target.id === 'backdrop') closeModal(); });
+function openModal(html, opts = {}) {
+  const closeOnBackdrop = opts.closeOnBackdrop === true;
+  const closeBtn = '<button class="modal-close-btn" onclick="closeModal()" title="Đóng">&times;</button>';
+  let header = '';
+  let body = html;
+  const h3Match = html.match(/<h3[^>]*>.*?<\/h3>/i);
+  if (h3Match) {
+    header = `<div class="modal-header">${h3Match[0]}${closeBtn}</div>`;
+    body = html.replace(h3Match[0], '');
+  } else {
+    header = `<div class="modal-header">${closeBtn}</div>`;
+  }
+  modalRoot.innerHTML = `<div class="modal-backdrop" id="backdrop"><div class="modal${opts.className ? " " + opts.className : ""}">${header}${body}</div></div>`;
+  if (closeOnBackdrop) {
+    $('#backdrop').addEventListener('click', (e) => { if (e.target.id === 'backdrop') closeModal(); });
+  }
 }
 
 function escapeHtml(s) {
@@ -103,6 +116,8 @@ window.addEventListener('beforeunload', () => {
     const me = await api('/api/auth/me', { headers: { Authorization: 'Bearer ' + token } });
     state.currentUser = me.user;
     localStorage.setItem('kmt_user', JSON.stringify(me.user));
+    const userToggle = $('#userDropdownToggle');
+    if (userToggle) userToggle.textContent = escapeHtml(me.user.username) + ' ▾';
   } catch (e) {
     localStorage.removeItem('kmt_token');
     localStorage.removeItem('kmt_user');
@@ -140,31 +155,37 @@ window.addEventListener('beforeunload', () => {
 
   const dropdownToggle = $('#dropdownToggle');
   const dropdownMenu = $('#dropdownMenu');
+  const userDropdownToggle = $('#userDropdownToggle');
+  const userDropdownMenu = $('#userDropdownMenu');
+
+  function closeAllDropdowns() {
+    if (dropdownMenu) dropdownMenu.classList.remove('show');
+    if (userDropdownMenu) userDropdownMenu.classList.remove('show');
+  }
+
   if (dropdownToggle && dropdownMenu) {
     dropdownToggle.addEventListener('click', (e) => {
       e.stopPropagation();
-      dropdownMenu.classList.toggle('show');
-    });
-    document.addEventListener('click', (e) => {
-      if (!e.target.closest('#actionsDropdown')) {
-        dropdownMenu.classList.remove('show');
-      }
+      const opening = !dropdownMenu.classList.contains('show');
+      closeAllDropdowns();
+      if (opening) dropdownMenu.classList.add('show');
     });
   }
 
-  const userDropdownToggle = $('#userDropdownToggle');
-  const userDropdownMenu = $('#userDropdownMenu');
   if (userDropdownToggle && userDropdownMenu) {
     userDropdownToggle.addEventListener('click', (e) => {
       e.stopPropagation();
-      userDropdownMenu.classList.toggle('show');
-    });
-    document.addEventListener('click', (e) => {
-      if (!e.target.closest('#userDropdown')) {
-        userDropdownMenu.classList.remove('show');
-      }
+      const opening = !userDropdownMenu.classList.contains('show');
+      closeAllDropdowns();
+      if (opening) userDropdownMenu.classList.add('show');
     });
   }
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#actionsDropdown') && !e.target.closest('#userDropdown')) {
+      closeAllDropdowns();
+    }
+  });
 
   const userMgmtItem = $('.user-mgmt-item');
   const changePwItem = $('.change-pw-item');

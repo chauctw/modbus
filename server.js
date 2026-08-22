@@ -125,6 +125,10 @@ require('./routes/custom-tags')(app, db, helpers);
 require('./routes/api')(app, db);
 require('./routes/misc')(app, db, helpers);
 
+(function migrateCustomTags() {
+  db.prepare('UPDATE custom_tags SET realtime_enabled=1 WHERE realtime_enabled=0 AND tb_telemetry_enabled=0 AND tb_attributes_enabled=0').run();
+})();
+
 async function uploadToThingsBoard(tbDevice, tags, isAttributes) {
   if (!tbDevice.enabled || !tags.length) return;
   const protocol = tbDevice.protocol === 'https' ? 'https' : 'http';
@@ -223,26 +227,34 @@ async function processThingsBoardUploads() {
       collect(tb, tbAttributesTagsStmt.all(tb.id, tb.id), attributesPlan);
     });
 
-    if (!deviceTagMap.size) return;
+    // Query custom tag TB uploads (before early return so they are never skipped)
+    const customTelemetryTags = db.prepare('SELECT id, name, decimals, tb_telemetry_interval_ms FROM custom_tags WHERE tb_telemetry_enabled=1').all();
+    const customAttributesTags = db.prepare('SELECT id, name, decimals, tb_attributes_interval_ms FROM custom_tags WHERE tb_attributes_enabled=1').all();
 
+    if (!deviceTagMap.size && !customTelemetryTags.length && !customAttributesTags.length) return;
+
+    // Read Modbus values for regular tags
     const readResults = new Map();
-    await mapWithConcurrency([...deviceTagMap.entries()], DEVICE_READ_CONCURRENCY, async ([deviceId, tagMap]) => {
-      const dev = deviceByIdStmt.get(deviceId);
-      if (!dev || !dev.ip) return;
-      try {
-        const values = await require('./modbus-client').readTagsForDevice(dev, [...tagMap.values()]);
-        readResults.set(deviceId, values);
-        Object.entries(values || {}).forEach(([tagId, result]) => {
-          if (result && result.value != null) {
-            tagValueCache.set(`tag:${tagId}`, result.value);
-          }
-        });
-      } catch (err) {
-        console.error(`[TB] Đọc device ${dev.name} lỗi:`, err.message);
-      }
-    });
+    if (deviceTagMap.size) {
+      await mapWithConcurrency([...deviceTagMap.entries()], DEVICE_READ_CONCURRENCY, async ([deviceId, tagMap]) => {
+        const dev = deviceByIdStmt.get(deviceId);
+        if (!dev || !dev.ip) return;
+        try {
+          const values = await require('./modbus-client').readTagsForDevice(dev, [...tagMap.values()]);
+          readResults.set(deviceId, values);
+          Object.entries(values || {}).forEach(([tagId, result]) => {
+            if (result && result.value != null) {
+              tagValueCache.set(`tag:${tagId}`, result.value);
+            }
+          });
+        } catch (err) {
+          console.error(`[TB] Đọc device ${dev.name} lỗi:`, err.message);
+        }
+      });
+    }
 
     const uploadJobs = [];
+    // Upload regular tags
     telemetryPlan.forEach((rows, tbId) => {
       const tb = tbDevices.find((d) => d.id === tbId);
       const withValue = rows.map((t) => ({ ...t, last_value: readResults.get(t.device_id)?.[t.id]?.value }));
@@ -254,28 +266,39 @@ async function processThingsBoardUploads() {
       uploadJobs.push(uploadToThingsBoard(tb, withValue, true));
     });
 
-    if (dueTelemetryTb.length) {
-      const cRows = db.prepare('SELECT id, name, decimals FROM custom_tags WHERE tb_telemetry_enabled=1').all();
-      cRows.forEach((ct) => {
-        const mappings = db.prepare('SELECT tb_device_id FROM custom_tag_tb_devices WHERE custom_tag_id=?').all(ct.id);
-        mappings.forEach((m) => {
-          const tb = tbDevices.find((d) => d.id === m.tb_device_id);
-          if (!tb) return;
-          uploadJobs.push(uploadToThingsBoard(tb, [{ ...ct, last_value: customTagValueCache.get(ct.id) }], false));
-        });
+    // Upload custom tags (values come from customTagValueCache, not Modbus readResults)
+    customTelemetryTags.forEach((ct) => {
+      const mappings = db.prepare('SELECT tb_device_id FROM custom_tag_tb_devices WHERE custom_tag_id=?').all(ct.id);
+      mappings.forEach((m) => {
+        const tb = tbDevices.find((d) => d.id === m.tb_device_id);
+        if (!tb || !tb.enabled) return;
+        const value = customTagValueCache.get(ct.id);
+        if (value === null || value === undefined) return;
+        const key = `${ct.id}_${m.tb_device_id}`;
+        const lastUpload = customTagTbLastTelemetry.get(key) || 0;
+        const interval = ct.tb_telemetry_interval_ms || tb.telemetry_interval_ms || 5000;
+        if (now - lastUpload >= interval) {
+          customTagTbLastTelemetry.set(key, now);
+          uploadJobs.push(uploadToThingsBoard(tb, [{ ...ct, last_value: value }], false));
+        }
       });
-    }
-    if (dueAttributesTb.length) {
-      const cRows = db.prepare('SELECT id, name, decimals FROM custom_tags WHERE tb_attributes_enabled=1').all();
-      cRows.forEach((ct) => {
-        const mappings = db.prepare('SELECT tb_device_id FROM custom_tag_tb_devices WHERE custom_tag_id=?').all(ct.id);
-        mappings.forEach((m) => {
-          const tb = tbDevices.find((d) => d.id === m.tb_device_id);
-          if (!tb) return;
-          uploadJobs.push(uploadToThingsBoard(tb, [{ ...ct, last_value: customTagValueCache.get(ct.id) }], true));
-        });
+    });
+    customAttributesTags.forEach((ct) => {
+      const mappings = db.prepare('SELECT tb_device_id FROM custom_tag_tb_devices WHERE custom_tag_id=?').all(ct.id);
+      mappings.forEach((m) => {
+        const tb = tbDevices.find((d) => d.id === m.tb_device_id);
+        if (!tb || !tb.enabled) return;
+        const value = customTagValueCache.get(ct.id);
+        if (value === null || value === undefined) return;
+        const key = `${ct.id}_${m.tb_device_id}`;
+        const lastUpload = customTagTbLastAttributes.get(key) || 0;
+        const interval = ct.tb_attributes_interval_ms || tb.attributes_interval_ms || 5000;
+        if (now - lastUpload >= interval) {
+          customTagTbLastAttributes.set(key, now);
+          uploadJobs.push(uploadToThingsBoard(tb, [{ ...ct, last_value: value }], true));
+        }
       });
-    }
+    });
     await Promise.all(uploadJobs);
   } catch (err) {
     console.error('[TB] Process uploads error:', err.message);
@@ -387,8 +410,18 @@ const { compile } = require('./expression-engine');
 async function evaluateCustomTags() {
   try {
     const tags = db.prepare('SELECT * FROM custom_tags WHERE realtime_enabled=1 OR tb_telemetry_enabled=1 OR tb_attributes_enabled=1').all();
+    const needsSync = tags.filter(ct => {
+      const cnt = db.prepare('SELECT COUNT(*) c FROM custom_tag_sources WHERE custom_tag_id=?').get(ct.id).c;
+      return cnt === 0;
+    });
+    if (needsSync.length) {
+      const { syncSourcesFromExpression } = require('./routes/custom-tags');
+      for (const ct of needsSync) {
+        syncSourcesFromExpression(ct.id, ct.expression, db, helpers);
+      }
+    }
     const tagInfo = db.prepare(`
-      SELECT t.id, t.name as tag_name, t.device_id,
+      SELECT t.id, t.name as tag_name, t.address, t.data_type, t.device_id,
              d.name as device_name, d.channel_id,
              c.name as channel_name
       FROM tags t
@@ -398,6 +431,59 @@ async function evaluateCustomTags() {
     const tagInfoMap = new Map(tagInfo.map(t => [t.id, t]));
     const customTagNames = new Map();
     db.prepare('SELECT id, name FROM custom_tags').all().forEach(ct => customTagNames.set(ct.id, ct.name));
+
+    const allTagSources = db.prepare('SELECT * FROM custom_tag_sources WHERE source_type=?').all('tag');
+    const missingTagIds = new Set();
+    allTagSources.forEach((src) => {
+      if (!tagValueCache.has(`tag:${src.source_tag_id}`)) missingTagIds.add(src.source_tag_id);
+    });
+    if (missingTagIds.size) {
+      const tagsToRead = [...missingTagIds].map(id => tagInfoMap.get(id)).filter(Boolean);
+      const deviceTagMap = new Map();
+      tagsToRead.forEach((t) => {
+        if (!deviceTagMap.has(t.device_id)) deviceTagMap.set(t.device_id, []);
+        deviceTagMap.get(t.device_id).push(t);
+      });
+      await mapWithConcurrency([...deviceTagMap.entries()], DEVICE_READ_CONCURRENCY, async ([deviceId, devTags]) => {
+        const dev = deviceByIdStmt.get(deviceId);
+        if (!dev || !dev.ip) return;
+        try {
+          const modbusClient = require('./modbus-client');
+          const values = await modbusClient.readTagsForDevice(dev, devTags);
+          Object.entries(values || {}).forEach(([tagId, result]) => {
+            if (result && result.value != null) {
+              tagValueCache.set(`tag:${tagId}`, result.value);
+            }
+          });
+        } catch (err) {
+          console.error(`[CustomTag] Đọc device ${dev.name} lỗi:`, err.message);
+        }
+      });
+    }
+
+    const allApiSources = db.prepare('SELECT DISTINCT source_api_key FROM custom_tag_sources WHERE source_type=?').all('api_key');
+    const missingApiKeys = allApiSources.map(s => s.source_api_key).filter(k => !tagValueCache.has(`api:${k}`));
+    if (missingApiKeys.length) {
+      try {
+        const { fetchCleanWaterLive, fetchRawWaterLive, fetchViwaterLive } = require('./live_fetchers');
+        const [cleanWater, rawWater, viwater] = await Promise.all([
+          fetchCleanWaterLive(10000), fetchRawWaterLive(10000), fetchViwaterLive(10000),
+        ]);
+        [...cleanWater, ...rawWater, ...viwater].forEach(item => {
+          const metrics = item.rawData || {};
+          Object.entries(metrics).forEach(([metric, value]) => {
+            const key = `${item.tag_name}_${metric}`;
+            if (missingApiKeys.includes(key)) {
+              tagValueCache.set(`api:${key}`, value);
+              apiKeysKnown.add(key);
+            }
+          });
+        });
+      } catch (err) {
+        console.error('[CustomTag] Fetch API lỗi:', err.message);
+      }
+    }
+
     for (const ct of tags) {
       const sources = db.prepare('SELECT * FROM custom_tag_sources WHERE custom_tag_id=? ORDER BY sort_order, id').all(ct.id);
       const ctx = {};
@@ -447,6 +533,8 @@ function startCustomTagService() {
 
 const tbLastTelemetry = new Map();
 const tbLastAttributes = new Map();
+const customTagTbLastTelemetry = new Map();
+const customTagTbLastAttributes = new Map();
 const TB_CYCLE_INTERVAL_MS = 1000;
 let tbLoopTimer = null;
 async function tbLoopTick() {

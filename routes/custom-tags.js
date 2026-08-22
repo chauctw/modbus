@@ -1,4 +1,74 @@
-module.exports = function register(app, db, helpers) {
+function tokenizeExpression(expr) {
+  const RE = { IDENT: /^[^\s+\-*/(),]+/, OP: /^[+\-*/]/, LPAREN: /^\(/, RPAREN: /^\)/, COMMA: /^,/ };
+  const TokenType = { NUMBER: 'NUMBER', IDENT: 'IDENT', OP: 'OP', LPAREN: 'LPAREN', RPAREN: 'RPAREN', COMMA: 'COMMA' };
+  let s = String(expr).trim();
+  const idents = new Set();
+  while (s.length > 0) {
+    let matched = false;
+    for (const type of [TokenType.IDENT, TokenType.OP, TokenType.LPAREN, TokenType.RPAREN, TokenType.COMMA]) {
+      const m = s.match(RE[type]);
+      if (m) {
+        const tok = m[0];
+        if (type === TokenType.IDENT && !/^-?\d+(?:\.\d+)?$/.test(tok) && !['abs', 'round', 'min', 'max'].includes(tok.toLowerCase())) {
+          idents.add(tok);
+        }
+        s = s.slice(tok.length).trim();
+        matched = true;
+        break;
+      }
+    }
+    if (!matched) { s = s.slice(1).trim(); }
+  }
+  return idents;
+}
+
+function syncSourcesFromExpression(customTagId, expression, db, helpers) {
+  const idents = tokenizeExpression(expression);
+  if (!idents.size) return;
+
+  const tags = db.prepare('SELECT id, name, device_id FROM tags').all();
+  const devices = db.prepare('SELECT id, name, channel_id FROM devices').all();
+  const channels = db.prepare('SELECT id, name FROM channels').all();
+  const devMap = new Map(devices.map(d => [d.id, d]));
+  const chMap = new Map(channels.map(c => [c.id, c]));
+  const tagRefMap = new Map();
+  tags.forEach(t => {
+    const dev = devMap.get(t.device_id);
+    const ch = dev ? chMap.get(dev.channel_id) : null;
+    const ref = ch && dev ? helpers.makeTagRef(ch.name, dev.name, t.name, t.id) : helpers.makeTagRef('', '', t.name, t.id);
+    tagRefMap.set(ref, t.id);
+  });
+  const dbApiKeys = db.prepare('SELECT DISTINCT api_key FROM api_tb_mappings').all().map(r => r.api_key);
+  const knownApiKeys = new Set([...dbApiKeys, ...helpers.getKnownApiKeys()]);
+  const customTags = db.prepare('SELECT id, name FROM custom_tags WHERE id != ?').all(customTagId);
+  const customRefMap = new Map();
+  customTags.forEach(ct => {
+    customRefMap.set(helpers.makeCustomTagRef(ct.name, ct.id), ct.id);
+  });
+
+  const desired = new Map();
+  idents.forEach(ident => {
+    if (tagRefMap.has(ident)) desired.set('tag:' + tagRefMap.get(ident), { source_type: 'tag', source_tag_id: tagRefMap.get(ident) });
+    else if (knownApiKeys.has(ident)) desired.set('api:' + ident, { source_type: 'api_key', source_api_key: ident });
+    else if (customRefMap.has(ident)) desired.set('custom:' + customRefMap.get(ident), { source_type: 'custom_tag', source_custom_tag_id: customRefMap.get(ident) });
+  });
+
+  const existing = db.prepare('SELECT * FROM custom_tag_sources WHERE custom_tag_id=?').all(customTagId);
+  const existingKeys = new Set();
+  existing.forEach(s => {
+    const key = s.source_type === 'tag' ? 'tag:' + s.source_tag_id : s.source_type === 'api_key' ? 'api:' + s.source_api_key : 'custom:' + s.source_custom_tag_id;
+    existingKeys.add(key);
+  });
+
+  let maxOrder = existing.length ? Math.max(...existing.map(s => s.sort_order)) + 1 : 0;
+  for (const [key, src] of desired) {
+    if (existingKeys.has(key)) continue;
+    db.prepare('INSERT INTO custom_tag_sources (custom_tag_id, source_type, source_tag_id, source_api_key, source_custom_tag_id, sort_order) VALUES (?,?,?,?,?,?)')
+      .run(customTagId, src.source_type, src.source_tag_id || null, src.source_api_key || null, src.source_custom_tag_id || null, maxOrder++);
+  }
+}
+
+function register(app, db, helpers) {
   app.get('/api/custom-tags', (req, res) => {
     const rows = db.prepare('SELECT * FROM custom_tags ORDER BY sort_order, id').all();
     res.json(rows);
@@ -10,7 +80,8 @@ module.exports = function register(app, db, helpers) {
     const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),-1) m FROM custom_tags').get().m;
     const info = db.prepare(
       `INSERT INTO custom_tags (name, expression, decimals, sort_order, realtime_enabled, tb_telemetry_enabled, tb_telemetry_interval_ms, tb_attributes_enabled, tb_attributes_interval_ms, raw_json) VALUES (?,?,?,?,?,?,?,?,?,?)`
-    ).run(name, expression, Number.isInteger(decimals) ? decimals : 2, maxOrder + 1, realtime_enabled ? 1 : 0, tb_telemetry_enabled ? 1 : 0, Number.isInteger(tb_telemetry_interval_ms) ? tb_telemetry_interval_ms : 5000, tb_attributes_enabled ? 1 : 0, Number.isInteger(tb_attributes_interval_ms) ? tb_attributes_interval_ms : 5000, JSON.stringify({ name, expression }));
+    ).run(name, expression, Number.isInteger(decimals) ? decimals : 2, maxOrder + 1, 1, tb_telemetry_enabled ? 1 : 0, Number.isInteger(tb_telemetry_interval_ms) ? tb_telemetry_interval_ms : 5000, tb_attributes_enabled ? 1 : 0, Number.isInteger(tb_attributes_interval_ms) ? tb_attributes_interval_ms : 5000, JSON.stringify({ name, expression }));
+    syncSourcesFromExpression(Number(info.lastInsertRowid), expression, db, helpers);
     res.json({ id: Number(info.lastInsertRowid) });
   });
 
@@ -33,6 +104,7 @@ module.exports = function register(app, db, helpers) {
       Number.isInteger(tb_attributes_interval_ms) ? tb_attributes_interval_ms : ct.tb_attributes_interval_ms,
       JSON.stringify(raw), req.params.id
     );
+    if (expression != null) syncSourcesFromExpression(Number(req.params.id), expression, db, helpers);
     res.json({ ok: true });
   });
 
@@ -113,4 +185,7 @@ module.exports = function register(app, db, helpers) {
     const out = rows.map(r => ({ id: r.id, name: r.name, value: helpers.customTagValueCache.get(r.id), decimals: r.decimals }));
     res.json(out);
   });
-};
+}
+
+module.exports = register;
+module.exports.syncSourcesFromExpression = syncSourcesFromExpression;

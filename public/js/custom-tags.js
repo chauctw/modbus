@@ -64,6 +64,25 @@ function renderCustomTagTable(tags) {
     });
   });
   startCustomTagRealtime();
+  renderCustomTagTbDevices();
+}
+
+async function renderCustomTagTbDevices() {
+  const rows = document.querySelectorAll('#customTagTableBody tr');
+  for (const tr of rows) {
+    const ctId = Number(tr.dataset.id);
+    try {
+      const devices = await api(`/api/custom-tags/${ctId}/tb-devices`);
+      const cell = tr.querySelector('.cell-tb-devices');
+      if (cell) {
+        if (devices.length) {
+          cell.textContent = devices.map(d => d.name).join(', ');
+        } else {
+          cell.textContent = '—';
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }
 }
 
 async function saveCustomTagInlineEdit(id, tr) {
@@ -141,7 +160,6 @@ function showPickerFloating(triggerBtn, title, items, getLabel, getValue) {
 
 async function openCustomTagForm(ct = null) {
   const isEdit = !!ct;
-  const sources = isEdit ? await api(`/api/custom-tags/${ct.id}/sources`) : [];
   const available = await api('/api/custom-tags/sources/available');
   const tbDevices = await api('/api/thingsboard-devices');
   const mapped = isEdit ? await api(`/api/custom-tags/${ct.id}/tb-devices`) : [];
@@ -164,7 +182,9 @@ async function openCustomTagForm(ct = null) {
     </div>
     <div class="field"><label>Decimals</label><input id="f-decimals" type="number" value="${ct ? ct.decimals : 2}" /></div>
     <div class="checkbox-inline"><input type="checkbox" id="f-tb-telemetry" ${ct && ct.tb_telemetry_enabled ? 'checked' : ''} /> <label for="f-tb-telemetry">Telemetry</label></div>
+    <div class="field"><label>Chu kỳ Telemetry (ms)</label><input id="f-tb-telemetry-interval" type="number" value="${ct ? ct.tb_telemetry_interval_ms || 5000 : 5000}" min="100" /></div>
     <div class="checkbox-inline"><input type="checkbox" id="f-tb-attributes" ${ct && ct.tb_attributes_enabled ? 'checked' : ''} /> <label for="f-tb-attributes">Attributes</label></div>
+    <div class="field"><label>Chu kỳ Attributes (ms)</label><input id="f-tb-attributes-interval" type="number" value="${ct ? ct.tb_attributes_interval_ms || 5000 : 5000}" min="100" /></div>
     <div class="field">
       <label>Thiết bị ThingsBoard</label>
       <select id="f-tb" multiple size="4">
@@ -217,52 +237,11 @@ async function openCustomTagForm(ct = null) {
     try {
       let customTagId;
       if (isEdit) {
-        await api(`/api/custom-tags/${ct.id}`, { method: 'PUT', body: JSON.stringify({ name, expression, decimals, tb_telemetry_enabled: tbTelemetry, tb_attributes_enabled: tbAttributes }) });
+        await api(`/api/custom-tags/${ct.id}`, { method: 'PUT', body: JSON.stringify({ name, expression, decimals, tb_telemetry_enabled: tbTelemetry, tb_telemetry_interval_ms: Number($('#f-tb-telemetry-interval').value) || 5000, tb_attributes_enabled: tbAttributes, tb_attributes_interval_ms: Number($('#f-tb-attributes-interval').value) || 5000 }) });
         customTagId = ct.id;
       } else {
-        const r = await api('/api/custom-tags', { method: 'POST', body: JSON.stringify({ name, expression, decimals, tb_telemetry_enabled: tbTelemetry, tb_attributes_enabled: tbAttributes }) });
+        const r = await api('/api/custom-tags', { method: 'POST', body: JSON.stringify({ name, expression, decimals, tb_telemetry_enabled: tbTelemetry, tb_telemetry_interval_ms: Number($('#f-tb-telemetry-interval').value) || 5000, tb_attributes_enabled: tbAttributes, tb_attributes_interval_ms: Number($('#f-tb-attributes-interval').value) || 5000 }) });
         customTagId = r.id;
-      }
-      const currentSources = isEdit ? sources : [];
-      const currentSourceRefs = new Set(currentSources.map(s => {
-        if (s.source_type === 'tag') return `tag:${s.source_tag_id}`;
-        if (s.source_type === 'api_key') return `api:${s.source_api_key}`;
-        if (s.source_type === 'custom_tag') return `custom:${s.source_custom_tag_id}`;
-        return '';
-      }).filter(Boolean));
-
-      const desiredRefs = new Set();
-      const tagRefToId = new Map(available.tags.map(t => [t.ref, t.id]));
-      const apiKeySet = new Set(available.apiKeys);
-      const customRefToId = new Map(available.customTags.map(c => [c.ref, c.id]));
-
-      const tokens = expression.split(/[+\-*/(),]+/).map(t => t.trim()).filter(Boolean);
-      tokens.forEach(token => {
-        if (apiKeySet.has(token)) {
-          desiredRefs.add(`api:${token}`);
-        } else if (customRefToId.has(token)) {
-          desiredRefs.add(`custom:${customRefToId.get(token)}`);
-        } else if (tagRefToId.has(token)) {
-          desiredRefs.add(`tag:${tagRefToId.get(token)}`);
-        }
-      });
-
-      for (const ref of desiredRefs) {
-        if (currentSourceRefs.has(ref)) continue;
-        const [type, idStr] = ref.split(':');
-        const id = Number(idStr);
-        if (type === 'tag') await api(`/api/custom-tags/${customTagId}/sources`, { method: 'POST', body: JSON.stringify({ source_type: 'tag', source_tag_id: id }) });
-        else if (type === 'api_key') await api(`/api/custom-tags/${customTagId}/sources`, { method: 'POST', body: JSON.stringify({ source_type: 'api_key', source_api_key: idStr }) });
-        else if (type === 'custom_tag') await api(`/api/custom-tags/${customTagId}/sources`, { method: 'POST', body: JSON.stringify({ source_type: 'custom_tag', source_custom_tag_id: id }) });
-      }
-
-      if (isEdit) {
-        for (const s of currentSources) {
-          const ref = s.source_type === 'tag' ? `tag:${s.source_tag_id}` : s.source_type === 'api_key' ? `api:${s.source_api_key}` : `custom:${s.source_custom_tag_id}`;
-          if (!desiredRefs.has(ref)) {
-            await api(`/api/custom-tags/${customTagId}/sources/${s.id}`, { method: 'DELETE' });
-          }
-        }
       }
 
       const currentMapped = new Set(mapped.map(m => m.id));

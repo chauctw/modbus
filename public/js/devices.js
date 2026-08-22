@@ -174,7 +174,6 @@ function showEmptyState() {
   stopRealtime();
   stopCustomTagRealtime();
   currentLiveSource = null;
-  userManagementVisible = false;
   $('#emptyState').style.display = 'block';
   $('#userHeader').style.display = 'none';
   $('#userTableWrap').style.display = 'none';

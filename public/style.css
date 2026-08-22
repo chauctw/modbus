@@ -455,10 +455,16 @@ body {
 .table-wrap table {
   width: 100% !important;
   min-width: 100% !important;
-  table-layout: fixed !important;
+  table-layout: auto !important;
   border-collapse: collapse;
   background: transparent;
   border: none;
+}
+
+.table-wrap table th,
+.table-wrap table td {
+  white-space: nowrap;
+  padding: 5px 8px;
 }
 
 /* --- Header --- */
@@ -485,6 +491,8 @@ th {
   text-align: center;
   vertical-align: middle;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   transition: all var(--transition);
 }
 
@@ -536,7 +544,6 @@ tbody tr.row-selected:hover td {
 /* Ẩn cột thừa */
 #tagTable th.col-scaling,
 #tagTable td.col-scaling { display: none; }
-#tagTable col.col-scaling { display: none; }
 
 /* ---------------------------------------------------------------------- */
 /* Căn lề và ép Width (Đồng bộ)                                           */
@@ -755,6 +762,7 @@ td select.cell-rw:hover {
   border-radius: 10px;
   padding: 5px;
   width: 520px;
+  position: relative;
   max-width: 90vw;
   max-height: 85vh;
   overflow-y: auto;
@@ -984,6 +992,59 @@ td select.cell-rw:hover {
   cursor: default;
   pointer-events: none;
   color: var(--muted);
+}
+
+/* User management modal */
+.user-mgmt-table-wrap {
+  max-height: 60vh;
+  margin-bottom: 14px;
+  overflow: hidden !important;
+}
+.modal.modal-wide {
+  width: 780px;
+}
+
+.modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--panel);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 10px 10px 0 0;
+  margin: 0 -5px;
+  padding: 5px 5px 5px 0;
+}
+.modal-header h3 {
+  margin: 0;
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.modal-close-btn {
+  background: transparent;
+  border: none;
+  font-size: 22px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  transition: all var(--transition);
+  line-height: 1;
+  flex-shrink: 0;
+}
+.modal-close-btn:hover {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+#userMgmtTable th,
+#userMgmtTable td {
+  text-align: left;
+}
+#userMgmtTable th:first-child,
+#userMgmtTable td:first-child {
+  text-align: center;
+  width: 40px;
 }
 
 .topbar-actions .btn-small {

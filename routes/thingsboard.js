@@ -47,6 +47,8 @@ module.exports = function register(app, db) {
   app.delete('/api/thingsboard-devices/:id', (req, res) => {
     db.prepare('DELETE FROM thingsboard_devices WHERE id=?').run(req.params.id);
     db.prepare('DELETE FROM tag_tb_devices WHERE tb_device_id=?').run(req.params.id);
+    db.prepare('DELETE FROM custom_tag_tb_devices WHERE tb_device_id=?').run(req.params.id);
+    db.prepare('DELETE FROM api_tb_mappings WHERE tb_device_id=?').run(req.params.id);
     db.prepare('UPDATE devices SET default_tb_device_id=NULL WHERE default_tb_device_id=?').run(req.params.id);
     res.json({ ok: true });
   });

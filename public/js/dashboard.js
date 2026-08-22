@@ -25,7 +25,7 @@ async function loadDashboard() {
       openModal(html);
       return;
     }
-    html += `<div class="table-wrap" style="max-height:60vh;margin-bottom:16px"><table><colgroup><col style="width:50px" /><col style="width:auto" /><col style="width:140px" /><col style="width:150px" /><col style="width:120px" /><col style="width:100px" /></colgroup><thead><tr><th>#</th><th>Channel</th><th>Device</th><th>Tag Name</th><th>Tag Address</th><th>Số lượng trùng</th></tr></thead><tbody>`;
+    html += `<div class="table-wrap" style="max-height:60vh;margin-bottom:16px"><table><thead><tr><th>#</th><th>Channel</th><th>Device</th><th>Tag Name</th><th>Tag Address</th><th>Số lượng trùng</th></tr></thead><tbody>`;
     let idx = 1;
     (v.dupTagNames || []).forEach(r => {
       html += `<tr><td>${idx++}</td><td>${escapeHtml(r.channel_name || '')}</td><td>${escapeHtml(r.device_name || 'Device #${r.device_id}')}</td><td style="color:var(--danger);font-weight:600">${escapeHtml(r.name)}</td><td class="muted">-</td><td>${r.count}</td></tr>`;
