@@ -113,6 +113,35 @@ function getApiFetchConfigs() {
   return map;
 }
 
+// Kiểm tra trạng thái kết nối API live dựa trên cache của live_fetchers
+function getApiConnectionStatus() {
+  const { state: fetcherState } = require('./live_fetchers');
+  const now = Date.now();
+  const configs = getApiFetchConfigs();
+  const status = {};
+  const channels = [
+    { key: 'clean_water', label: 'Nước Sạch', lastFetchKey: 'lastCleanWaterFetch', cacheKey: 'cachedCleanWaterData' },
+    { key: 'raw_water', label: 'Nước Thô', lastFetchKey: 'lastRawWaterFetch', cacheKey: 'cachedRawWaterData' },
+    { key: 'viwater', label: 'Viwater', lastFetchKey: 'lastViwaterFetch', cacheKey: 'cachedViwaterData' },
+  ];
+  channels.forEach(ch => {
+    const lastFetch = fetcherState[ch.lastFetchKey] || 0;
+    const cache = fetcherState[ch.cacheKey] || [];
+    const interval = configs[ch.key]?.fetch_interval_ms || 10000;
+    const timeSinceFetch = now - lastFetch;
+    const hasData = cache.length > 0;
+    const isFresh = hasData && timeSinceFetch < interval * 2;
+    status[ch.key] = {
+      label: ch.label,
+      connected: isFresh,
+      hasData,
+      lastFetchAgo: lastFetch > 0 ? timeSinceFetch : null,
+      fetchInterval: interval,
+    };
+  });
+  return status;
+}
+
 const helpers = {
   channelWithCounts,
   deviceWithCounts,
@@ -137,6 +166,16 @@ require('./routes/thingsboard')(app, db);
 require('./routes/custom-tags')(app, db, helpers);
 require('./routes/api')(app, db);
 require('./routes/misc')(app, db, helpers);
+
+// API endpoint cho trạng thái kết nối API live
+app.get('/api/api-status', authenticate, (req, res) => {
+  try {
+    res.json(getApiConnectionStatus());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+require('./routes/svg-editor')(app, db);
 
 (function migrateCustomTags() {
   db.prepare('UPDATE custom_tags SET realtime_enabled=1 WHERE realtime_enabled=0 AND tb_telemetry_enabled=0 AND tb_attributes_enabled=0').run();
@@ -218,6 +257,11 @@ async function processThingsBoardUploads() {
     const dueAttributesTb = tbDevices.filter((tb) => now - (tbLastAttributes.get(tb.id) || 0) >= (tb.attributes_interval_ms || 5000));
     if (!dueTelemetryTb.length && !dueAttributesTb.length) return;
 
+    // Query per-tag intervals (each tag may have its own tb_telemetry_interval_ms / tb_attributes_interval_ms)
+    const tagIntervalStmt = db.prepare('SELECT id, tb_telemetry_interval_ms, tb_attributes_interval_ms FROM tags');
+    const tagIntervals = new Map();
+    tagIntervalStmt.all().forEach((r) => tagIntervals.set(r.id, r));
+
     const deviceTagMap = new Map();
     const telemetryPlan = new Map();
     const attributesPlan = new Map();
@@ -233,11 +277,37 @@ async function processThingsBoardUploads() {
 
     dueTelemetryTb.forEach((tb) => {
       tbLastTelemetry.set(tb.id, now);
-      collect(tb, tbTelemetryTagsStmt.all(tb.id, tb.id), telemetryPlan);
+      const rows = tbTelemetryTagsStmt.all(tb.id, tb.id);
+      // Filter by per-tag tb_telemetry_interval_ms
+      const filtered = rows.filter((t) => {
+        const ti = tagIntervals.get(t.id);
+        const interval = (ti && ti.tb_telemetry_interval_ms > 0) ? ti.tb_telemetry_interval_ms : (tb.telemetry_interval_ms || 5000);
+        const tagKey = `${t.id}_${tb.id}`;
+        const last = tagTbLastTelemetry.get(tagKey) || 0;
+        if (now - last >= interval) {
+          tagTbLastTelemetry.set(tagKey, now);
+          return true;
+        }
+        return false;
+      });
+      collect(tb, filtered, telemetryPlan);
     });
     dueAttributesTb.forEach((tb) => {
       tbLastAttributes.set(tb.id, now);
-      collect(tb, tbAttributesTagsStmt.all(tb.id, tb.id), attributesPlan);
+      const rows = tbAttributesTagsStmt.all(tb.id, tb.id);
+      // Filter by per-tag tb_attributes_interval_ms
+      const filtered = rows.filter((t) => {
+        const ti = tagIntervals.get(t.id);
+        const interval = (ti && ti.tb_attributes_interval_ms > 0) ? ti.tb_attributes_interval_ms : (tb.attributes_interval_ms || 5000);
+        const tagKey = `${t.id}_${tb.id}`;
+        const last = tagTbLastAttributes.get(tagKey) || 0;
+        if (now - last >= interval) {
+          tagTbLastAttributes.set(tagKey, now);
+          return true;
+        }
+        return false;
+      });
+      collect(tb, filtered, attributesPlan);
     });
 
     // Query custom tag TB uploads (before early return so they are never skipped)
@@ -564,6 +634,8 @@ function startCustomTagService() {
 
 const tbLastTelemetry = new Map();
 const tbLastAttributes = new Map();
+const tagTbLastTelemetry = new Map(); // key: `${tagId}_${tbId}`
+const tagTbLastAttributes = new Map(); // key: `${tagId}_${tbId}`
 const customTagTbLastTelemetry = new Map();
 const customTagTbLastAttributes = new Map();
 const TB_CYCLE_INTERVAL_MS = 1000;

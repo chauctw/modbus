@@ -152,6 +152,13 @@ ensureColumn('tags', 'tb_telemetry_interval_ms', 'INTEGER DEFAULT 5000');
 ensureColumn('tags', 'tb_attributes_enabled', 'INTEGER DEFAULT 0');
 ensureColumn('tags', 'tb_attributes_interval_ms', 'INTEGER DEFAULT 5000');
 ensureColumn('thingsboard_devices', 'telemetry_interval_ms', 'INTEGER DEFAULT 5000');
+
+// Migration: Reset per-tag TB intervals từ 5000 (old default) về 0 (=kế thừa từ TB device)
+// Để tránh tag mặc định ghi đè interval đã cấu hình ở ThingsBoard device.
+db.prepare("UPDATE tags SET tb_telemetry_interval_ms = 0 WHERE tb_telemetry_interval_ms = 5000").run();
+db.prepare("UPDATE tags SET tb_attributes_interval_ms = 0 WHERE tb_attributes_interval_ms = 5000").run();
+db.prepare("UPDATE custom_tags SET tb_telemetry_interval_ms = 0 WHERE tb_telemetry_interval_ms = 5000").run();
+db.prepare("UPDATE custom_tags SET tb_attributes_interval_ms = 0 WHERE tb_attributes_interval_ms = 5000").run();
 ensureColumn('thingsboard_devices', 'attributes_interval_ms', 'INTEGER DEFAULT 5000');
 ensureColumn('thingsboard_devices', 'protocol', "TEXT DEFAULT 'http'");
 // Cho phép gán 1 thiết bị ThingsBoard "mặc định" ngay ở cấp Device: mọi tag của
@@ -327,5 +334,22 @@ if (userCount === 0) {
     }
   });
 })();
+
+
+// ---- SVG Editor ----
+db.exec(`
+CREATE TABLE IF NOT EXISTS svg_config (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  thingsboard_host TEXT DEFAULT "https://iot.ctn-cantho.com.vn",
+  thingsboard_username TEXT DEFAULT "admin@canthowassco.vn",
+  thingsboard_password TEXT DEFAULT "",
+  svg_url TEXT DEFAULT "/api/images/public/RpWUmDMoMh4l3NzbAzH7zkdU2vgDN57P",
+  svg_local_content TEXT DEFAULT ""
+);
+`);
+if (!db.prepare("SELECT id FROM svg_config WHERE id=1").get()) {
+  db.prepare(`INSERT INTO svg_config (id, thingsboard_host, thingsboard_username, thingsboard_password, svg_url)
+    VALUES (1, 'https://iot.ctn-cantho.com.vn', 'admin@canthowassco.vn', '', '/api/images/public/RpWUmDMoMh4l3NzbAzH7zkdU2vgDN57P')`).run();
+}
 
 module.exports = db;

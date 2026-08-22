@@ -42,18 +42,15 @@ function startRealtime() {
   state.realtimeEnabled = true;
   pollLiveValues();
   state.realtimeTimer = setInterval(pollLiveValues, realtimePollMs);
-  // Refresh dashboard mỗi 10s để cập nhật số liệu realtime / mất kết nối
-  if (typeof loadDashboard === 'function') {
-    state.dashboardRefreshTimer = setInterval(loadDashboard, 10000);
-  }
+  // Kết nối SSE để cập nhật realtime trạng thái modbus (nhanh hơn poll 10s)
+  startModbusStatusSSE();
 }
 
 function stopRealtime() {
   state.realtimeEnabled = false;
   if (state.realtimeTimer) clearInterval(state.realtimeTimer);
   state.realtimeTimer = null;
-  if (state.dashboardRefreshTimer) clearInterval(state.dashboardRefreshTimer);
-  state.dashboardRefreshTimer = null;
+  stopModbusStatusSSE();
   const status = $('#realtimeStatus');
   if (status) status.textContent = '';
 }
@@ -96,4 +93,45 @@ async function pollCustomTagValues() {
   } catch (e) {
     console.error('pollCustomTagValues error', e);
   }
+}
+
+// ---- SSE: Cập nhật realtime số lượng thiết bị modbus mất kết nối ----
+let _modbusSSE = null;
+
+function startModbusStatusSSE() {
+  if (_modbusSSE) return;
+  try {
+    const es = new EventSource('/api/modbus-status-stream');
+    es.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        if (data.disconnectedDevices != null && typeof updateModbusCard === 'function') {
+          updateModbusCard(data.disconnectedDevices);
+        }
+        // Cập nhật danh sách device mất kết nối + render lại tree icon
+        if (data.disconnectedDeviceIds) {
+          state.disconnectedDeviceIds = new Set(data.disconnectedDeviceIds);
+          if (typeof renderTree === 'function') renderTree();
+        }
+      } catch (err) { /* ignore parse error */ }
+    };
+    es.onerror = () => {
+      // SSE tự reconnect, nhưng nếu server chết thì fallback về loadDashboard
+      if (typeof loadDashboard === 'function' && !state.dashboardRefreshTimer) {
+        state.dashboardRefreshTimer = setInterval(loadDashboard, 10000);
+      }
+    };
+    _modbusSSE = es;
+  } catch (e) {
+    console.error('SSE modbus status error:', e);
+  }
+}
+
+function stopModbusStatusSSE() {
+  if (_modbusSSE) {
+    _modbusSSE.close();
+    _modbusSSE = null;
+  }
+  if (state.dashboardRefreshTimer) clearInterval(state.dashboardRefreshTimer);
+  state.dashboardRefreshTimer = null;
 }

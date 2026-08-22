@@ -82,12 +82,12 @@ function register(app, db, helpers) {
   });
 
   app.post('/api/custom-tags', (req, res) => {
-    const { name, expression, decimals = 2, realtime_enabled = 0, tb_telemetry_enabled = 0, tb_telemetry_interval_ms = 5000, tb_attributes_enabled = 0, tb_attributes_interval_ms = 5000 } = req.body;
+    const { name, expression, decimals = 2, realtime_enabled = 0, tb_telemetry_enabled = 0, tb_telemetry_interval_ms = 0, tb_attributes_enabled = 0, tb_attributes_interval_ms = 0 } = req.body;
     if (!name || !expression) return res.status(400).json({ error: 'Thiếu tên / biểu thức' });
     const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order),-1) m FROM custom_tags').get().m;
     const info = db.prepare(
       `INSERT INTO custom_tags (name, expression, decimals, sort_order, realtime_enabled, tb_telemetry_enabled, tb_telemetry_interval_ms, tb_attributes_enabled, tb_attributes_interval_ms, raw_json) VALUES (?,?,?,?,?,?,?,?,?,?)`
-    ).run(name, expression, Number.isInteger(decimals) ? decimals : 2, maxOrder + 1, 1, tb_telemetry_enabled ? 1 : 0, Number.isInteger(tb_telemetry_interval_ms) ? tb_telemetry_interval_ms : 5000, tb_attributes_enabled ? 1 : 0, Number.isInteger(tb_attributes_interval_ms) ? tb_attributes_interval_ms : 5000, JSON.stringify({ name, expression }));
+    ).run(name, expression, Number.isInteger(decimals) ? decimals : 2, maxOrder + 1, 1, tb_telemetry_enabled ? 1 : 0, Number.isInteger(tb_telemetry_interval_ms) ? tb_telemetry_interval_ms : 0, tb_attributes_enabled ? 1 : 0, Number.isInteger(tb_attributes_interval_ms) ? tb_attributes_interval_ms : 0, JSON.stringify({ name, expression }));
     syncSourcesFromExpression(Number(info.lastInsertRowid), expression, db, helpers);
     res.json({ id: Number(info.lastInsertRowid) });
   });

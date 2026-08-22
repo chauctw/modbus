@@ -206,18 +206,18 @@ body {
 /* ---------------------------------------------------------------------- */
 .dashboard {
   display: flex;
-  gap: 16px;
+  gap: 8px;
   padding: 5px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
 }
 .stat-card {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 5px;
-  min-width: 150px;
+  flex: 1 1 0;
+  min-width: 0;
   box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
@@ -351,6 +351,24 @@ body {
   color: #fff;
 }
 .tree-device-row.active .badge { background: rgba(255,255,255,0.2); color: #fff; border-color: transparent; }
+.tree-device-status {
+  margin-right: 5px;
+  font-size: 10px;
+  flex-shrink: 0;
+  line-height: 1;
+  position: relative;
+  top: 1px;
+}
+.tree-device-status.disconnected { animation: pulse-red 2s infinite; }
+.tree-device-status.stale { animation: pulse-yellow 3s infinite; }
+@keyframes pulse-yellow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+@keyframes pulse-red {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
 
 .badge {
   background: var(--bg);
@@ -1052,6 +1070,17 @@ td select.cell-rw:hover {
   font-size: 12px;
 }
 
+/* Tab buttons — placed early to avoid override by later sections */
+.topbar-tabs { display: flex; gap: 2px; margin-right: 16px; align-items: stretch; }
+.tab-btn {
+  padding: 6px 18px; border: none; background: transparent;
+  color: var(--text-secondary) !important; font-weight: 600; font-size: 13px;
+  cursor: pointer; letter-spacing: 0.04em;
+  transition: var(--transition); border-radius: var(--radius) var(--radius) 0 0;
+}
+.tab-btn:hover { color: var(--accent) !important; background: var(--accent-light); }
+.tab-btn.active { color: #fff !important; background: var(--accent); }
+
 #userTable th:nth-child(2),
 #userTable td:nth-child(2),
 #userTable th:nth-child(4),
@@ -1142,10 +1171,12 @@ td select.cell-rw:hover {
   }
   .dashboard {
   padding: 5px;
-    gap: 10px;
+    gap: 6px;
+    flex-wrap: wrap;
   }
    .stat-card {
-     min-width: 120px;
+     flex: 1 1 calc(25% - 6px);
+     min-width: 100px;
      padding: 5px;
    }
   .stat-card .num {
@@ -1185,4 +1216,158 @@ td select.cell-rw:hover {
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   height: 48px;
+}
+
+/* =========================================================================
+   SVG Editor
+   ========================================================================= */
+
+
+
+.svg-editor-fullwidth {
+  display: none; flex-direction: column;
+  padding: 12px 16px; overflow: auto;
+  min-height: calc(100vh - 48px);
+}
+.svg-editor-toolbar {
+  display: flex; gap: 8px; align-items: center;
+  padding: 8px 0; margin-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.svg-container-full {
+  flex: 1; border: 2px dashed var(--border); background: var(--panel);
+  padding: 0; overflow: hidden; min-height: 400px;
+  border-radius: var(--radius);
+  position: relative; cursor: grab;
+  background-image: radial-gradient(circle, var(--border) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+.svg-container-full svg {
+  width: 100%; height: 100%;
+  position: absolute; top: 0; left: 0;
+  transform-origin: 0 0;
+}
+.svg-container-full svg g[id]:not(#TB_Group),
+.svg-container-full svg text[id] { cursor: pointer; }
+.svg-container-full svg g[id]:not(#TB_Group):hover,
+.svg-container-full svg text[id]:hover {
+  filter: drop-shadow(0 0 3px var(--accent));
+}
+
+.svg-highlighted {
+  outline: 3px dashed var(--danger) !important;
+  filter: drop-shadow(0 0 4px var(--danger));
+}
+
+/* SVG ID Edit Modal */
+.svg-id-modal {
+  position: fixed; z-index: 1000;
+  background: var(--panel); border-radius: var(--radius);
+  box-shadow: var(--shadow-lg); width: 280px;
+  padding: 16px; border: 1px solid var(--border);
+}
+.svg-id-modal h3 { margin: 0 0 12px; font-size: 15px; color: var(--text); }
+.svg-form-group { margin-bottom: 10px; }
+.svg-form-group label { display: block; margin-bottom: 4px; font-weight: 600; font-size: 12px; color: var(--muted); }
+.svg-form-group input {
+  width: 100%; padding: 6px 8px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); font-size: 13px; background: var(--panel);
+  color: var(--text); outline: none; transition: var(--transition);
+}
+.svg-form-group input:focus { border-color: var(--accent); }
+.svg-btn-group { text-align: right; margin-top: 14px; display: flex; gap: 6px; justify-content: flex-end; }
+
+/* SVG Toast */
+.svg-toast {
+  position: fixed; bottom: 30px; right: 20px; z-index: 2000;
+  padding: 10px 18px; border-radius: var(--radius);
+  color: #fff; font-size: 13px; font-weight: 500;
+  opacity: 0; transform: translateY(10px);
+  transition: opacity 0.3s, transform 0.3s;
+  box-shadow: var(--shadow-md);
+}
+.svg-toast.show { opacity: 1; transform: translateY(0); }
+.svg-toast-success { background: var(--ok); }
+.svg-toast-error { background: var(--danger); }
+
+/* SVG Loading Overlay */
+.svg-loading-overlay {
+  display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.5); z-index: 3000;
+  justify-content: center; align-items: center; flex-direction: column;
+  color: #fff; font-weight: 600;
+}
+.svg-spinner {
+  border: 4px solid rgba(255,255,255,0.3);
+  border-top: 4px solid var(--accent);
+  border-radius: 50%; width: 40px; height: 40px;
+  animation: spin 1s linear infinite; margin-bottom: 12px;
+}
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+.svg-loading-text { font-size: 14px; }
+
+/* SVG Toolbar Divider */
+.svg-toolbar-divider {
+  width: 1px; height: 24px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+/* SVG Gallery Dropdown (in toolbar) */
+.svg-gallery-dropdown {
+  min-width: 340px; max-height: 420px;
+  display: none; flex-direction: column;
+  padding: 0 !important;
+  left: 0; right: auto;
+}
+.svg-gallery-dropdown.show {
+  display: flex;
+  opacity: 1; transform: translateY(0);
+}
+.svg-gallery-search {
+  width: auto !important;
+  margin: 0 !important;
+  padding: 8px 12px !important;
+  border: none !important;
+  border-bottom: 1px solid var(--border) !important;
+  border-radius: 0 !important;
+  font-size: 13px !important;
+  background: var(--panel) !important;
+  outline: none !important;
+  flex-shrink: 0;
+}
+.svg-gallery-search:focus {
+  border-bottom-color: var(--accent) !important;
+}
+.svg-gallery-list {
+  overflow-y: auto; flex: 1; min-height: 80px; max-height: 360px;
+}
+
+/* SVG Gallery Item */
+.svg-gallery-item {
+  display: flex; align-items: center;
+  padding: 7px 12px; cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px; color: var(--text);
+  transition: all var(--transition);
+  gap: 6px;
+}
+.svg-gallery-item:hover {
+  background: var(--accent-light); color: var(--accent);
+}
+.svg-gallery-item:last-child { border-bottom: none; }
+.svg-gallery-item-name {
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.svg-gallery-svg-tag {
+  display: inline-block; font-size: 10px; font-weight: 700;
+  background: var(--accent-light); color: var(--accent);
+  padding: 1px 5px; border-radius: 3px; margin-left: 6px;
+  vertical-align: middle;
+}
+.svg-gallery-selected {
+  background: var(--accent-light) !important;
+  color: var(--accent) !important;
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent);
 }

@@ -72,7 +72,7 @@ module.exports = function register(app, db, helpers) {
   });
 
   app.post('/api/tags', (req, res) => {
-    const { device_id, name, address, data_type = 5, rw_access = 0, scaling = null, decimals = 2, realtime_enabled = 0, tb_telemetry_enabled = 0, tb_telemetry_interval_ms = 5000, tb_attributes_enabled = 0, tb_attributes_interval_ms = 5000 } = req.body;
+    const { device_id, name, address, data_type = 5, rw_access = 0, scaling = null, decimals = 2, realtime_enabled = 0, tb_telemetry_enabled = 0, tb_telemetry_interval_ms = 0, tb_attributes_enabled = 0, tb_attributes_interval_ms = 0 } = req.body;
     if (!device_id || !name || address == null) return res.status(400).json({ error: 'Thiếu device_id / name / address' });
 
     const raw = {
@@ -98,7 +98,7 @@ module.exports = function register(app, db, helpers) {
     const info = db.prepare(
       `INSERT INTO tags (device_id,name,address,data_type,rw_access,scaling_type,sort_order,decimals,realtime_enabled,tb_telemetry_enabled,tb_telemetry_interval_ms,tb_attributes_enabled,tb_attributes_interval_ms,raw_json)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
-    ).run(device_id, name, String(address), data_type, rw_access, scaling ? 1 : 0, maxOrder + 1, Number.isInteger(decimals) ? decimals : 2, realtime_enabled ? 1 : 0, tb_telemetry_enabled ? 1 : 0, Number.isInteger(tb_telemetry_interval_ms) ? tb_telemetry_interval_ms : 5000, tb_attributes_enabled ? 1 : 0, Number.isInteger(tb_attributes_interval_ms) ? tb_attributes_interval_ms : 5000, JSON.stringify(raw));
+    ).run(device_id, name, String(address), data_type, rw_access, scaling ? 1 : 0, maxOrder + 1, Number.isInteger(decimals) ? decimals : 2, realtime_enabled ? 1 : 0, tb_telemetry_enabled ? 1 : 0, Number.isInteger(tb_telemetry_interval_ms) ? tb_telemetry_interval_ms : 0, tb_attributes_enabled ? 1 : 0, Number.isInteger(tb_attributes_interval_ms) ? tb_attributes_interval_ms : 0, JSON.stringify(raw));
     res.json({ id: info.lastInsertRowid });
   });
 

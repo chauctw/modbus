@@ -6,6 +6,19 @@ const ModbusRTU = require('modbus-serial');
 
 const pool = new Map(); // deviceId -> { client, connecting: Promise|null }
 const scanCache = new Map(); // deviceId -> { lastScanTime, values, tagIds }
+const lastReadOk = new Map(); // deviceId -> timestamp của lần đọc thành công (có ít nhất 1 tag quality=good) gần nhất
+
+// Event emitter cho trạng thái kết nối modbus thay đổi
+const listeners = new Set();
+function onStatusChange(fn) { listeners.add(fn); }
+function offStatusChange(fn) { listeners.delete(fn); }
+function _emitStatusChange() {
+  // Chỉ emit khi danh sách thay đổi thực sự
+  // (sẽ được gọi sau mỗi lần đọc xong)
+  for (const fn of listeners) {
+    try { fn(); } catch (e) { /* ignore */ }
+  }
+}
 
 async function getConnection(device) {
   let entry = pool.get(device.id);
@@ -44,6 +57,9 @@ function closeConnection(deviceId) {
     try { entry.client.close(() => {}); } catch (e) { /* ignore */ }
   }
   pool.delete(deviceId);
+  scanCache.delete(String(deviceId));
+  lastReadOk.delete(deviceId);
+  _emitStatusChange();
 }
 
 function closeAll() {
@@ -320,6 +336,7 @@ async function readTagsForDevice(device, tags) {
   } catch (err) {
     const result = {};
     tags.forEach((t) => { result[t.id] = { value: null, quality: 'bad', error: `Không kết nối được: ${err.message}` }; });
+    _emitStatusChange();
     return result;
   }
 
@@ -334,6 +351,15 @@ async function readTagsForDevice(device, tags) {
   }
 
   const result = await readTagsBatch(client, tags, device);
+
+  // Ghi nhận thời điểm đọc thành công nếu có ít nhất 1 tag trả về good
+  const hasGood = Object.values(result).some(r => r && r.quality === 'good');
+  if (hasGood) {
+    lastReadOk.set(device.id, now);
+  }
+
+  // Emit khi trạng thái có thể đã thay đổi (kết nối thành công hoặc mất kết nối)
+  _emitStatusChange();
 
   scanCache.set(cacheKey, {
     lastScanTime: now,
@@ -352,4 +378,24 @@ function getConnectedDeviceIds() {
   return ids;
 }
 
-module.exports = { readTagsForDevice, closeConnection, closeAll, parseAddress, getConnectedDeviceIds };
+// Thời gian tối đa coi lastReadOk là "mới" (ms).
+// Nếu lần đọc thành công cuối cùng cũ hơn ngưỡng này → coi như mất kết nối.
+const STALE_THRESHOLD_MS = 15_000; // 15 giây
+
+// Trả về danh sách device id đang "mất kết nối":
+// - Không có socket trong pool, HOẶC
+// - Có socket nhưng chưa từng đọc được tag nào có quality=good, HOẶC
+// - Có socket + đã đọc good nhưng lần cuối quá cũ (stale)
+function getDisconnectedDeviceIds(deviceIds) {
+  const connectedIds = getConnectedDeviceIds();
+  const now = Date.now();
+  return deviceIds.filter(id => {
+    if (!connectedIds.has(id)) return true; // không có socket
+    if (!lastReadOk.has(id)) return true;   // có socket nhưng chưa đọc được gì good
+    const lastOk = lastReadOk.get(id);
+    if (now - lastOk > STALE_THRESHOLD_MS) return true; // đọc được nhưng đã cũ
+    return false;
+  });
+}
+
+module.exports = { readTagsForDevice, closeConnection, closeAll, parseAddress, getConnectedDeviceIds, getDisconnectedDeviceIds, onStatusChange, offStatusChange };

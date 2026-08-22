@@ -8,7 +8,10 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>IOT - GATEWAY</h1>
+    <div class="topbar-tabs">
+      <button class="tab-btn active" id="tabGateway">IOT GATEWAY</button>
+      <button class="tab-btn" id="tabSvgEditor">SVG EDITOR</button>
+    </div>    
     <div class="topbar-actions" id="topbarActions">
       <div class="dropdown" id="userDropdown">
        <button class="btn dropdown-toggle" id="userDropdownToggle" type="button"> ▾</button>
@@ -196,8 +199,33 @@
       <div id="emptyState" class="empty-state">
         <p>Chọn 1 device ở cây bên trái, hoặc bấm <b>Import JSON</b> để bắt đầu.</p>
       </div>
+
     </section>
   </main>
+
+  <!-- SVG Editor (full-width, outside main layout) -->
+  <div id="svgEditorWrap" style="display:none" class="svg-editor-fullwidth">
+    <div class="svg-editor-toolbar">
+      <button class="btn" id="svgConfigBtn">⚙ Cấu hình TB</button>
+      <div class="svg-toolbar-divider"></div>
+      <div class="dropdown" id="svgImageGalleryDropdown">
+        <button class="btn" id="svgGalleryBtn">📂 Image Gallery ▾</button>
+        <div class="dropdown-menu svg-gallery-dropdown" id="svgGalleryMenu">
+          <input type="text" id="svgGallerySearch" class="svg-gallery-search" placeholder="Tìm ảnh..." />
+          <div id="svgGalleryList" class="svg-gallery-list"><p style="padding:12px;text-align:center;color:var(--muted)">Đang tải...</p></div>
+        </div>
+      </div>
+      <div class="svg-toolbar-divider"></div>
+      <button class="btn btn-small" id="svgZoomInBtn" title="Zoom In">🔍+</button>
+      <button class="btn btn-small" id="svgZoomResetBtn" title="Reset Zoom" style="font-size:11px">1:1</button>
+      <button class="btn btn-small" id="svgZoomOutBtn" title="Zoom Out">🔍−</button>
+      <div class="svg-toolbar-divider"></div>
+      <button class="btn" id="svgSyncFromTbBtn">⬇ Tải từ ThingsBoard</button>
+      <button class="btn btn-primary" id="svgSyncToTbBtn">☁️ Đồng bộ lên ThingsBoard</button>
+      <span id="svgStatus" class="muted"></span>
+    </div>
+    <div id="svgContainer" class="svg-container-full">Chưa có SVG</div>
+  </div>
 
   <div id="modalRoot"></div>
 
@@ -212,5 +240,6 @@
   <script src="/js/tree-events.js"></script>
   <script src="/js/live-fetch.js"></script>
   <script src="/js/import-export.js"></script>
+  <script src="/js/svg-editor.js"></script>
 </body>
 </html>

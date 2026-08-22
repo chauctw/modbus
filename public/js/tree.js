@@ -66,13 +66,23 @@ function renderTree() {
   `;
 
   const apiDevicesEl = apiSection.querySelector('.tree-devices');
+  // Map liveFetchSources key → apiStatus key
+  const apiKeyMap = { cleanWater: 'clean_water', rawWater: 'raw_water', viwater: 'viwater' };
   liveFetchSources.forEach((src) => {
     const row = document.createElement('div');
     row.className = 'tree-device-row' + (currentLiveSource === src.key ? ' active' : '');
     row.dataset.device = src.key;
     row.dataset.channel = '__api__';
     row.dataset.type = 'api';
-    row.innerHTML = `<span>${escapeHtml(src.label).toUpperCase()}</span>`;
+    const apiKey = apiKeyMap[src.key];
+    const apiSt = (state.apiStatus || {})[apiKey];
+    let apiIcon = '<span class="tree-device-status" title="Chưa có dữ liệu">⚪</span>';
+    if (apiSt) {
+      if (apiSt.connected) apiIcon = '<span class="tree-device-status connected" title="Đang kết nối">🟢</span>';
+      else if (apiSt.hasData) apiIcon = '<span class="tree-device-status stale" title="Mất kết nối (có dữ liệu cũ)">🟡</span>';
+      else apiIcon = '<span class="tree-device-status disconnected" title="Mất kết nối">🔴</span>';
+    }
+    row.innerHTML = `${apiIcon}<span>${escapeHtml(src.label).toUpperCase()}</span>`;
     row.addEventListener('click', (e) => {
       e.stopPropagation();
       selectLiveSource(src.key);
@@ -168,7 +178,9 @@ function renderTree() {
       row.dataset.device = d.id;
       row.dataset.channel = ch.id;
       row.dataset.type = 'modbus';
-      row.innerHTML = `<span>${escapeHtml(d.name)}</span>`;
+      const isDisconnected = state.disconnectedDeviceIds.has(d.id);
+      const statusIcon = isDisconnected ? '<span class="tree-device-status disconnected" title="Mất kết nối Modbus">🔴</span>' : '<span class="tree-device-status connected" title="Đang kết nối">🟢</span>';
+      row.innerHTML = `${statusIcon}<span>${escapeHtml(d.name)}</span>`;
       row.addEventListener('click', (e) => {
         e.stopPropagation();
         selectDevice(ch.id, d.id);

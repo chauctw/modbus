@@ -182,9 +182,9 @@ async function openCustomTagForm(ct = null) {
     </div>
     <div class="field"><label>Decimals</label><input id="f-decimals" type="number" value="${ct ? ct.decimals : 2}" /></div>
     <div class="checkbox-inline"><input type="checkbox" id="f-tb-telemetry" ${ct && ct.tb_telemetry_enabled ? 'checked' : ''} /> <label for="f-tb-telemetry">Telemetry</label></div>
-    <div class="field"><label>Chu kỳ Telemetry (ms)</label><input id="f-tb-telemetry-interval" type="number" value="${ct ? ct.tb_telemetry_interval_ms || 5000 : 5000}" min="100" /></div>
+    <div class="field"><label>Chu kỳ Telemetry (ms)<small> (0 = kế thừa từ TB Device)</small></label><input id="f-tb-telemetry-interval" type="number" value="${ct ? ct.tb_telemetry_interval_ms || 0 : 0}" min="0" /></div>
     <div class="checkbox-inline"><input type="checkbox" id="f-tb-attributes" ${ct && ct.tb_attributes_enabled ? 'checked' : ''} /> <label for="f-tb-attributes">Attributes</label></div>
-    <div class="field"><label>Chu kỳ Attributes (ms)</label><input id="f-tb-attributes-interval" type="number" value="${ct ? ct.tb_attributes_interval_ms || 5000 : 5000}" min="100" /></div>
+    <div class="field"><label>Chu kỳ Attributes (ms)<small> (0 = kế thừa từ TB Device)</small></label><input id="f-tb-attributes-interval" type="number" value="${ct ? ct.tb_attributes_interval_ms || 0 : 0}" min="0" /></div>
     <div class="field">
       <label>Thiết bị ThingsBoard</label>
       <select id="f-tb" multiple size="4">
@@ -237,10 +237,10 @@ async function openCustomTagForm(ct = null) {
     try {
       let customTagId;
       if (isEdit) {
-        await api(`/api/custom-tags/${ct.id}`, { method: 'PUT', body: JSON.stringify({ name, expression, decimals, tb_telemetry_enabled: tbTelemetry, tb_telemetry_interval_ms: Number($('#f-tb-telemetry-interval').value) || 5000, tb_attributes_enabled: tbAttributes, tb_attributes_interval_ms: Number($('#f-tb-attributes-interval').value) || 5000 }) });
+        await api(`/api/custom-tags/${ct.id}`, { method: 'PUT', body: JSON.stringify({ name, expression, decimals, tb_telemetry_enabled: tbTelemetry, tb_telemetry_interval_ms: Number($('#f-tb-telemetry-interval').value) || 0, tb_attributes_enabled: tbAttributes, tb_attributes_interval_ms: Number($('#f-tb-attributes-interval').value) || 0 }) });
         customTagId = ct.id;
       } else {
-        const r = await api('/api/custom-tags', { method: 'POST', body: JSON.stringify({ name, expression, decimals, tb_telemetry_enabled: tbTelemetry, tb_telemetry_interval_ms: Number($('#f-tb-telemetry-interval').value) || 5000, tb_attributes_enabled: tbAttributes, tb_attributes_interval_ms: Number($('#f-tb-attributes-interval').value) || 5000 }) });
+        const r = await api('/api/custom-tags', { method: 'POST', body: JSON.stringify({ name, expression, decimals, tb_telemetry_enabled: tbTelemetry, tb_telemetry_interval_ms: Number($('#f-tb-telemetry-interval').value) || 0, tb_attributes_enabled: tbAttributes, tb_attributes_interval_ms: Number($('#f-tb-attributes-interval').value) || 0 }) });
         customTagId = r.id;
       }
 

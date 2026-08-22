@@ -17,14 +17,15 @@ module.exports = function register(app, db, helpers) {
       tagsRealtime: db.prepare('SELECT COUNT(*) c FROM tags WHERE realtime_enabled=1').get().c
         + db.prepare('SELECT COUNT(*) c FROM custom_tags WHERE realtime_enabled=1').get().c,
     };
-    // Thiết bị Modbus đang mất kết nối: có tag realtime_enabled nhưng không có kết nối active
+    // Thiết bị Modbus mất kết nối: không có socket hoặc chưa đọc được tag nào good
     try {
-      const { getConnectedDeviceIds } = require('../modbus-client');
-      const connectedIds = getConnectedDeviceIds();
-      const rtDeviceIds = db.prepare(
-        'SELECT DISTINCT d.id FROM devices d JOIN tags t ON t.device_id = d.id WHERE t.realtime_enabled = 1 AND d.ip IS NOT NULL AND d.ip != ""'
+      const { getDisconnectedDeviceIds } = require('../modbus-client');
+      const allIpDevices = db.prepare(
+        "SELECT DISTINCT id FROM devices WHERE ip IS NOT NULL AND ip != ''"
       ).all().map(r => r.id);
-      totals.disconnectedDevices = rtDeviceIds.filter(id => !connectedIds.has(id)).length;
+      const disconnectedIds = getDisconnectedDeviceIds(allIpDevices);
+      totals.disconnectedDevices = disconnectedIds.length;
+      totals.disconnectedDeviceIds = disconnectedIds;
     } catch (e) {
       totals.disconnectedDevices = 0;
     }
@@ -42,6 +43,48 @@ module.exports = function register(app, db, helpers) {
     ).all();
 
     res.json({ totals, byDataType, byDeviceScanRate, duplicateIPs });
+  });
+
+  // SSE endpoint: push số lượng thiết bị modbus mất kết nối ngay khi trạng thái thay đổi
+  app.get('/api/modbus-status-stream', (req, res) => {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.flushHeaders();
+
+    function sendStatus() {
+      try {
+        const { getDisconnectedDeviceIds } = require('../modbus-client');
+        const allIpDevices = db.prepare(
+          "SELECT DISTINCT id FROM devices WHERE ip IS NOT NULL AND ip != ''"
+        ).all().map(r => r.id);
+        const disconnected = getDisconnectedDeviceIds(allIpDevices);
+        res.write(`data: ${JSON.stringify({ disconnectedDevices: disconnected.length, disconnectedDeviceIds: disconnected })}\n\n`);
+      } catch (e) {
+        res.write(`data: ${JSON.stringify({ disconnectedDevices: 0, disconnectedDeviceIds: [] })}\n\n`);
+      }
+    }
+
+    // Gửi ngay khi vừa kết nối
+    sendStatus();
+
+    // Lắng nghe sự kiện thay đổi từ modbus-client
+    const { onStatusChange, offStatusChange } = require('../modbus-client');
+    const handler = () => sendStatus();
+    onStatusChange(handler);
+
+    // Heartbeat mỗi 15s để giữ kết nối không bị đóng
+    const heartbeat = setInterval(() => {
+      res.write(': heartbeat\n\n');
+    }, 15000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      offStatusChange(handler);
+    });
   });
 
   app.get('/api/validate', (req, res) => {

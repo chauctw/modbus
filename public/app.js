@@ -1,5 +1,6 @@
 const API = '';
 let state = {
+  activeTab: "gateway",
   tree: [],
   currentDeviceId: null,
   currentChannelId: null,
@@ -14,6 +15,10 @@ let state = {
   dataTypes: {},
   realtimeEnabled: false,
   realtimeTimer: null,
+  dashboardRefreshTimer: null,
+  customTagRealtime: false,
+  customTagTimer: null,
+  disconnectedDeviceIds: new Set(),
   statusFilter: '',
   tbDevices: [],
   tbFilter: false,
@@ -104,6 +109,57 @@ window.addEventListener('beforeunload', () => {
     navigator.sendBeacon(`/api/devices/${state.currentDeviceId}/live-disconnect`, JSON.stringify({}));
   }
 });
+
+
+// ---------- TAB SWITCHING ----------
+function hideAllContentSections() {
+  const sels = ['#deviceHeader','#tagToolbar','#tagTableWrap','#tagPagination',
+   '#customTagToolbar','#customTagTableWrap',
+   '#liveFetchConfigBar','#liveFetchTableWrap','#liveFetchPagination',
+   '#tbDeviceTableWrap','#tbDevicePagination',
+   '#userHeader','#userTableWrap','#emptyState'];
+  sels.forEach(function(sel) {
+    var el = document.querySelector(sel);
+    if (el) el.style.display = 'none';
+  });
+}
+
+function switchTab(tab) {
+  state.activeTab = tab;
+  var mainLayout = document.querySelector('main.layout');
+  var dashboard = document.querySelector('#dashboard');
+  var svgWrap = document.querySelector('#svgEditorWrap');
+  var topbarActions = document.querySelector('#topbarActions');
+
+  if (tab === 'svg-editor') {
+    if (mainLayout) mainLayout.style.display = 'none';
+    if (dashboard) dashboard.style.display = 'none';
+    if (svgWrap) svgWrap.style.display = 'flex';
+    if (topbarActions) topbarActions.style.display = 'none';
+    if (typeof loadSvgEditor === 'function') loadSvgEditor();
+  } else {
+    if (mainLayout) mainLayout.style.display = '';
+    if (dashboard) dashboard.style.display = '';
+    if (svgWrap) svgWrap.style.display = 'none';
+    if (topbarActions) topbarActions.style.display = '';
+    if (state.currentDeviceId) {
+      document.querySelector('#deviceHeader').style.display = '';
+      document.querySelector('#tagToolbar').style.display = '';
+      document.querySelector('#tagTableWrap').style.display = '';
+    } else if (state.currentChannelId === '__tb__') {
+      document.querySelector('#tbDeviceTableWrap').style.display = 'block';
+    } else if (state.currentChannelId === '__api__') {
+      document.querySelector('#liveFetchConfigBar').style.display = '';
+      document.querySelector('#liveFetchTableWrap').style.display = '';
+    } else if (state.currentChannelId === '__custom__') {
+      document.querySelector('#customTagToolbar').style.display = '';
+      document.querySelector('#customTagTableWrap').style.display = '';
+    }
+  }
+  document.querySelectorAll('.tab-btn').forEach(function(b) { b.classList.remove('active'); });
+  var targetBtn = document.querySelector(tab === 'gateway' ? '#tabGateway' : '#tabSvgEditor');
+  if (targetBtn) targetBtn.classList.add('active');
+}
 
 // ---------- INIT ----------
 (async function init() {
@@ -211,4 +267,11 @@ window.addEventListener('beforeunload', () => {
       logout();
     });
   }
+
+  // Tab click listeners
+  const tabGateway = document.querySelector('#tabGateway');
+  const tabSvgEditor = document.querySelector('#tabSvgEditor');
+  if (tabGateway) tabGateway.addEventListener('click', () => switchTab('gateway'));
+  if (tabSvgEditor) tabSvgEditor.addEventListener('click', () => switchTab('svg-editor'));
+
 })();

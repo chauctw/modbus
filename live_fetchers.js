@@ -113,6 +113,9 @@ async function getCleanWaterToken(forceRefresh = false) {
 
 async function fetchCleanWaterLive(fetchIntervalMs = 10000) {
     if (Date.now() - state.lastCleanWaterFetch < fetchIntervalMs) return state.cachedCleanWaterData;
+    // Cập nhật timestamp NGAY SAU interval check để đảm bảo lần gọi tiếp theo
+    // phải chờ đúng fetchIntervalMs, kể cả khi fetch thất bại (timeout/lỗi mạng).
+    state.lastCleanWaterFetch = Date.now();
     console.log(`[${new Date().toLocaleTimeString('vi-VN')}] 🌐 [API FETCH] Đang kéo dữ liệu Nước Sạch (mdcapi)...`);
     try {
         let token;
@@ -140,13 +143,13 @@ async function fetchCleanWaterLive(fetchIntervalMs = 10000) {
             metrics: (item.value && typeof item.value === 'object') ? Object.keys(item.value).map(k => k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[^a-zA-Z0-9]/g, '').toUpperCase()) : [],
             rawData: extractMetricValues(item.value) // Đã bóc tách lấy giá trị chi tiết
         }));
-        state.lastCleanWaterFetch = Date.now();
         return state.cachedCleanWaterData;
     } catch (e) { return state.cachedCleanWaterData; }
 }
 
 async function fetchRawWaterLive(fetchIntervalMs = 10000) {
     if (Date.now() - state.lastRawWaterFetch < fetchIntervalMs) return state.cachedRawWaterData;
+    state.lastRawWaterFetch = Date.now();
     console.log(`[${new Date().toLocaleTimeString('vi-VN')}] 🌐 [API FETCH] Đang kéo dữ liệu Nước Thô...`);
     try {
         const url = 'http://api.dulieuquantrac.com/?day=0&key=YTozOntzOjI6ImlkIjtpOjQyMTg7czozOiJ0YmwiO3M6MjY6InRibF90dmFfcXVhbnRyYWNfY3RuY2FudGhvIjtzOjM6ImtleSI7czozMjoiNGZkMTRiMmRlYzg0MWU4YWVkZjdkZTFkNzRmMzY2OGQiO30%3D';
@@ -164,13 +167,13 @@ async function fetchRawWaterLive(fetchIntervalMs = 10000) {
             metrics: (item.data && typeof item.data === 'object') ? Object.keys(item.data).map(k => k.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').replace(/[^a-zA-Z0-9]/g, '').toUpperCase()) : [],
             rawData: extractMetricValues(item.data) // Đã bóc tách lấy giá trị chi tiết
         }));
-        state.lastRawWaterFetch = Date.now();
         return state.cachedRawWaterData;
     } catch (e) { return state.cachedRawWaterData; }
 }
 
 async function fetchViwaterLive(fetchIntervalMs = 10000) {
     if (Date.now() - state.lastViwaterFetch < fetchIntervalMs) return state.cachedViwaterData;
+    state.lastViwaterFetch = Date.now();
     console.log(`[${new Date().toLocaleTimeString('vi-VN')}] 🌐 [API FETCH] Đang kéo dữ liệu Viwater...`);
     try {
         const baseUrl = 'https://viwater.ctn-cantho.com.vn/VivaServices//Service1.svc';
@@ -209,9 +212,8 @@ async function fetchViwaterLive(fetchIntervalMs = 10000) {
             }
         });
         state.cachedViwaterData = resultList;
-        state.lastViwaterFetch = Date.now();
         return state.cachedViwaterData;
     } catch (e) { return state.cachedViwaterData; }
 }
 
-module.exports = { fetchCleanWaterLive, fetchRawWaterLive, fetchViwaterLive };
+module.exports = { fetchCleanWaterLive, fetchRawWaterLive, fetchViwaterLive, state };
