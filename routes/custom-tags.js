@@ -164,7 +164,7 @@ function register(app, db, helpers) {
   });
 
   app.get('/api/custom-tags/sources/available', (req, res) => {
-    const tags = db.prepare('SELECT id, name, device_id FROM tags ORDER BY name').all();
+    const tags = db.prepare('SELECT id, name, device_id FROM tags WHERE realtime_enabled = 1 ORDER BY name').all();
     const devices = db.prepare('SELECT id, name, channel_id FROM devices ORDER BY name').all();
     const channels = db.prepare('SELECT id, name FROM channels ORDER BY name').all();
     const devMap = new Map(devices.map(d => [d.id, d]));
