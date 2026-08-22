@@ -8,7 +8,24 @@ module.exports = function register(app, db, helpers) {
       devices: db.prepare('SELECT COUNT(*) c FROM devices').get().c,
       tags: db.prepare('SELECT COUNT(*) c FROM tags').get().c,
       customTags: db.prepare('SELECT COUNT(*) c FROM custom_tags').get().c,
+      tagsTelemetry: db.prepare('SELECT COUNT(*) c FROM tags WHERE tb_telemetry_enabled=1').get().c
+        + db.prepare('SELECT COUNT(*) c FROM custom_tags WHERE tb_telemetry_enabled=1').get().c
+        + db.prepare('SELECT COUNT(*) c FROM api_tb_mappings WHERE telemetry_enabled=1').get().c,
+      tagsAttributes: db.prepare('SELECT COUNT(*) c FROM tags WHERE tb_attributes_enabled=1').get().c
+        + db.prepare('SELECT COUNT(*) c FROM custom_tags WHERE tb_attributes_enabled=1').get().c
+        + db.prepare('SELECT COUNT(*) c FROM api_tb_mappings WHERE attributes_enabled=1').get().c,
     };
+    // Thiết bị Modbus đang mất kết nối: có tag realtime_enabled nhưng không có kết nối active
+    try {
+      const { getConnectedDeviceIds } = require('../modbus-client');
+      const connectedIds = getConnectedDeviceIds();
+      const rtDeviceIds = db.prepare(
+        'SELECT DISTINCT d.id FROM devices d JOIN tags t ON t.device_id = d.id WHERE t.realtime_enabled = 1'
+      ).all().map(r => r.id);
+      totals.disconnectedDevices = rtDeviceIds.filter(id => !connectedIds.has(id)).length;
+    } catch (e) {
+      totals.disconnectedDevices = 0;
+    }
     const byDataType = db.prepare(
       'SELECT data_type, COUNT(*) count FROM tags GROUP BY data_type ORDER BY count DESC'
     ).all().map((r) => ({ ...r, dataTypeName: DATA_TYPES[r.data_type] || `Unknown(${r.data_type})` }));

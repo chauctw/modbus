@@ -344,4 +344,12 @@ async function readTagsForDevice(device, tags) {
   return result;
 }
 
-module.exports = { readTagsForDevice, closeConnection, closeAll, parseAddress };
+function getConnectedDeviceIds() {
+  const ids = new Set();
+  pool.forEach((entry, id) => {
+    if (entry.client && entry.client.isOpen) ids.add(id);
+  });
+  return ids;
+}
+
+module.exports = { readTagsForDevice, closeConnection, closeAll, parseAddress, getConnectedDeviceIds };
