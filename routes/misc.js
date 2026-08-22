@@ -14,13 +14,15 @@ module.exports = function register(app, db, helpers) {
       tagsAttributes: db.prepare('SELECT COUNT(*) c FROM tags WHERE tb_attributes_enabled=1').get().c
         + db.prepare('SELECT COUNT(*) c FROM custom_tags WHERE tb_attributes_enabled=1').get().c
         + db.prepare('SELECT COUNT(*) c FROM api_tb_mappings WHERE attributes_enabled=1').get().c,
+      tagsRealtime: db.prepare('SELECT COUNT(*) c FROM tags WHERE realtime_enabled=1').get().c
+        + db.prepare('SELECT COUNT(*) c FROM custom_tags WHERE realtime_enabled=1').get().c,
     };
     // Thiết bị Modbus đang mất kết nối: có tag realtime_enabled nhưng không có kết nối active
     try {
       const { getConnectedDeviceIds } = require('../modbus-client');
       const connectedIds = getConnectedDeviceIds();
       const rtDeviceIds = db.prepare(
-        'SELECT DISTINCT d.id FROM devices d JOIN tags t ON t.device_id = d.id WHERE t.realtime_enabled = 1'
+        'SELECT DISTINCT d.id FROM devices d JOIN tags t ON t.device_id = d.id WHERE t.realtime_enabled = 1 AND d.ip IS NOT NULL AND d.ip != ""'
       ).all().map(r => r.id);
       totals.disconnectedDevices = rtDeviceIds.filter(id => !connectedIds.has(id)).length;
     } catch (e) {

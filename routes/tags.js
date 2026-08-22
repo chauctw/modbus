@@ -5,7 +5,7 @@ module.exports = function register(app, db, helpers) {
   }
 
   app.get('/api/devices/:deviceId/tags', (req, res) => {
-    const { search = '', sort = 'sort_order', dir = 'asc', page = 1, pageSize: pageSizeRaw = 20, realtime, tb } = req.query;
+    const { search = '', sort = 'sort_order', dir = 'asc', page = 1, pageSize: pageSizeRaw = 20, realtime, tb, status } = req.query;
     const pageSize = Number(pageSizeRaw);
     const allowedSort = ['name', 'address', 'data_type', 'rw_access', 'scaling_type', 'sort_order', 'id'];
     const sortCol = allowedSort.includes(sort) ? sort : 'sort_order';
@@ -17,11 +17,19 @@ module.exports = function register(app, db, helpers) {
       where += ' AND (t.name LIKE ? OR t.address LIKE ?)';
       params.push(`%${search}%`, `%${search}%`);
     }
-    if (realtime == '1') {
+    if (status === 'realtime') {
       where += ' AND t.realtime_enabled = 1';
-    }
-    if (tb == '1') {
-      where += ' AND (t.tb_telemetry_enabled = 1 OR t.tb_attributes_enabled = 1)';
+    } else if (status === 'telemetry') {
+      where += ' AND t.tb_telemetry_enabled = 1';
+    } else if (status === 'attributes') {
+      where += ' AND t.tb_attributes_enabled = 1';
+    } else {
+      if (realtime == '1') {
+        where += ' AND t.realtime_enabled = 1';
+      }
+      if (tb == '1') {
+        where += ' AND (t.tb_telemetry_enabled = 1 OR t.tb_attributes_enabled = 1)';
+      }
     }
 
     const total = db.prepare(`SELECT COUNT(*) c FROM tags t ${where}`).get(...params).c;

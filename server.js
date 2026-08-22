@@ -257,7 +257,7 @@ async function processThingsBoardUploads() {
           readResults.set(deviceId, values);
           Object.entries(values || {}).forEach(([tagId, result]) => {
             if (result && result.value != null) {
-              tagValueCache.set(`tag:${tagId}`, result.value);
+              tagValueCache.set(`tag:${tagId}`, result.scaledValue != null ? result.scaledValue : result.value);
             }
           });
         } catch (err) {
@@ -270,12 +270,18 @@ async function processThingsBoardUploads() {
     // Upload regular tags
     telemetryPlan.forEach((rows, tbId) => {
       const tb = tbDevices.find((d) => d.id === tbId);
-      const withValue = rows.map((t) => ({ ...t, last_value: readResults.get(t.device_id)?.[t.id]?.value }));
+      const withValue = rows.map((t) => {
+        const r = readResults.get(t.device_id)?.[t.id];
+        return { ...t, last_value: r?.scaledValue != null ? r.scaledValue : r?.value };
+      });
       uploadJobs.push(uploadToThingsBoard(tb, withValue, false));
     });
     attributesPlan.forEach((rows, tbId) => {
       const tb = tbDevices.find((d) => d.id === tbId);
-      const withValue = rows.map((t) => ({ ...t, last_value: readResults.get(t.device_id)?.[t.id]?.value }));
+      const withValue = rows.map((t) => {
+        const r = readResults.get(t.device_id)?.[t.id];
+        return { ...t, last_value: r?.scaledValue != null ? r.scaledValue : r?.value };
+      });
       uploadJobs.push(uploadToThingsBoard(tb, withValue, true));
     });
 
@@ -465,7 +471,7 @@ async function evaluateCustomTags() {
           const values = await modbusClient.readTagsForDevice(dev, devTags);
           Object.entries(values || {}).forEach(([tagId, result]) => {
             if (result && result.value != null) {
-              tagValueCache.set(`tag:${tagId}`, result.value);
+              tagValueCache.set(`tag:${tagId}`, result.scaledValue != null ? result.scaledValue : result.value);
             }
           });
         } catch (err) {

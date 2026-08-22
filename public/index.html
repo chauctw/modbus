@@ -63,8 +63,12 @@
         <button class="btn" id="addTagBtn">+ Tag</button>
         <button class="btn" id="bulkAddBtn">+ Nhiều tag (CSV)</button>
         <button class="btn" id="bulkDeleteBtn" disabled>Xoá đã chọn</button>
-        <button class="btn" id="filterOnBtn">Chỉ tag ON</button>
-        <button class="btn" id="filterTbBtn">Chỉ tag TB</button>
+        <select id="filterStatus" class="filter-select">
+          <option value="">Tất cả tag</option>
+          <option value="realtime">🟢 Realtime ON</option>
+          <option value="telemetry">📡 Telemetry ON</option>
+          <option value="attributes">📋 Attributes ON</option>
+        </select>
         <span id="realtimeStatus" class="muted"></span>
         <span id="tagCountLabel" class="muted"></span>
       </div>

@@ -9,16 +9,14 @@ async function loadTags() {
   const q = new URLSearchParams({
     search: state.tagSearch, sort: state.sort, dir: state.dir,
     page: 1, pageSize: 999999,
-    realtime: state.realtimeFilter ? 1 : 0,
-    tb: state.tbFilter ? 1 : 0,
+    status: state.statusFilter || '',
   });
   const isTbDevice = state.currentDeviceId && String(state.currentDeviceId).startsWith('tb-');
   const endpoint = isTbDevice ? `/api/tb-devices/${state.currentDeviceId.replace('tb-', '')}/tags?${q}` : `/api/devices/${state.currentDeviceId}/tags?${q}`;
   const { total, page, pageSize, rows } = await api(endpoint);
   state.total = total;
   $('#tagCountLabel').textContent = `${total} tag`;
-  $('#filterOnBtn').classList.toggle('btn-primary', state.realtimeFilter);
-  $('#filterTbBtn').classList.toggle('btn-primary', state.tbFilter);
+  $('#filterStatus').value = state.statusFilter;
   $('#tagTable').style.display = 'table';
 
   const tbody = $('#tagTableBody');
@@ -75,6 +73,7 @@ async function loadTags() {
         await api(`/api/tags/${tag.id}`, { method: 'PUT', body: JSON.stringify({ realtime_enabled: newState }) });
         await loadTags();
         await loadTree();
+        await loadDashboard();
       } catch (err) {
         alert(err.message);
         loadTags();
@@ -212,14 +211,8 @@ $('#tagSearch').addEventListener('input', (e) => {
   searchDebounce = setTimeout(() => { state.tagSearch = e.target.value; state.page = 1; loadTags(); }, 250);
 });
 
-$('#filterOnBtn').addEventListener('click', () => {
-  state.realtimeFilter = !state.realtimeFilter;
-  state.page = 1;
-  loadTags();
-});
-
-$('#filterTbBtn').addEventListener('click', () => {
-  state.tbFilter = !state.tbFilter;
+$('#filterStatus').addEventListener('change', () => {
+  state.statusFilter = $('#filterStatus').value;
   state.page = 1;
   loadTags();
 });

@@ -707,8 +707,21 @@ td select.cell-rw:hover {
 /* ---------------------------------------------------------------------- */
 /* Ẩn hoàn toàn Phân pagination và Lọc                                    */
 /* ---------------------------------------------------------------------- */
-.pagination, #tagPagination, #liveFetchPagination, #tbDevicePagination, #filterTbBtn {
+.pagination, #tagPagination, #liveFetchPagination, #tbDevicePagination {
   display: none !important;
+}
+.filter-select {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.filter-select:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 /* Ẩn nút Reset */
 #resetBtn {

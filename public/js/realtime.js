@@ -4,14 +4,15 @@ function setLiveCell(id, res) {
   const dot = tr.querySelector('.live-dot');
   const text = tr.querySelector('.live-text');
   if (!dot || !text) return;
-  if (res.value === null || res.value === undefined || res.quality === 'bad') {
+  const displayValue = (res.scaledValue != null) ? res.scaledValue : res.value;
+  if (displayValue === null || displayValue === undefined || res.quality === 'bad') {
     dot.className = 'live-dot bad';
     text.className = 'live-text muted';
     text.textContent = '—';
   } else {
     dot.className = 'live-dot good';
     text.className = 'live-text';
-    text.textContent = formatNum(res.value);
+    text.textContent = formatNum(displayValue);
   }
 }
 
@@ -41,12 +42,18 @@ function startRealtime() {
   state.realtimeEnabled = true;
   pollLiveValues();
   state.realtimeTimer = setInterval(pollLiveValues, realtimePollMs);
+  // Refresh dashboard mỗi 10s để cập nhật số liệu realtime / mất kết nối
+  if (typeof loadDashboard === 'function') {
+    state.dashboardRefreshTimer = setInterval(loadDashboard, 10000);
+  }
 }
 
 function stopRealtime() {
   state.realtimeEnabled = false;
   if (state.realtimeTimer) clearInterval(state.realtimeTimer);
   state.realtimeTimer = null;
+  if (state.dashboardRefreshTimer) clearInterval(state.dashboardRefreshTimer);
+  state.dashboardRefreshTimer = null;
   const status = $('#realtimeStatus');
   if (status) status.textContent = '';
 }

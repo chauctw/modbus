@@ -14,7 +14,7 @@ let state = {
   dataTypes: {},
   realtimeEnabled: false,
   realtimeTimer: null,
-  realtimeFilter: false,
+  statusFilter: '',
   tbDevices: [],
   tbFilter: false,
   tbPage: 1,
