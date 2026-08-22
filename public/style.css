@@ -252,7 +252,7 @@ body {
 .layout { display: flex; flex: 1; min-height: 0; }
 
 .sidebar {
-  width: 310px;
+  width: 280px;
   flex-shrink: 0;
   background: var(--panel);
   border-right: 1px solid var(--border);
@@ -760,7 +760,7 @@ td select.cell-rw:hover {
 .modal {
   background: var(--panel);
   border-radius: 10px;
-  padding: 5px;
+  padding: 20px;
   width: 520px;
   position: relative;
   max-width: 90vw;

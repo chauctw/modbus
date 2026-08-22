@@ -1,28 +1,41 @@
-module.exports = function register(app, db) {
+module.exports = function register(app, db, helpers) {
+  const { sanitizePart } = helpers || {};
+  function computeDisplayName(chName, devName, tagName) {
+    return [chName, devName, tagName].filter(Boolean).map(sanitizePart || (s => String(s))).filter(Boolean).join('.');
+  }
+
   app.get('/api/devices/:deviceId/tags', (req, res) => {
-    const { search = '', sort = 'sort_order', dir = 'asc', page = 1, pageSize = 20, realtime, tb } = req.query;
+    const { search = '', sort = 'sort_order', dir = 'asc', page = 1, pageSize: pageSizeRaw = 20, realtime, tb } = req.query;
+    const pageSize = Number(pageSizeRaw);
     const allowedSort = ['name', 'address', 'data_type', 'rw_access', 'scaling_type', 'sort_order', 'id'];
     const sortCol = allowedSort.includes(sort) ? sort : 'sort_order';
     const sortDir = dir === 'desc' ? 'DESC' : 'ASC';
 
-    let where = 'WHERE device_id = ?';
+    let where = 'WHERE t.device_id = ?';
     const params = [req.params.deviceId];
     if (search) {
-      where += ' AND (name LIKE ? OR address LIKE ?)';
+      where += ' AND (t.name LIKE ? OR t.address LIKE ?)';
       params.push(`%${search}%`, `%${search}%`);
     }
     if (realtime == '1') {
-      where += ' AND realtime_enabled = 1';
+      where += ' AND t.realtime_enabled = 1';
     }
     if (tb == '1') {
-      where += ' AND (tb_telemetry_enabled = 1 OR tb_attributes_enabled = 1)';
+      where += ' AND (t.tb_telemetry_enabled = 1 OR t.tb_attributes_enabled = 1)';
     }
 
-    const total = db.prepare(`SELECT COUNT(*) c FROM tags ${where}`).get(...params).c;
-    const offset = (Number(page) - 1) * Number(pageSize);
+    const total = db.prepare(`SELECT COUNT(*) c FROM tags t ${where}`).get(...params).c;
+    const offset = (Number(page) - 1) * pageSize;
     const rows = db.prepare(
-      `SELECT * FROM tags ${where} ORDER BY ${sortCol} ${sortDir} LIMIT ? OFFSET ?`
-    ).all(...params, Number(pageSize), offset);
+      `SELECT t.*, d.name AS device_name, c.name AS channel_name
+       FROM tags t
+       JOIN devices d ON d.id = t.device_id
+       JOIN channels c ON c.id = d.channel_id
+       ${where}
+       ORDER BY t.${sortCol} ${sortDir}
+       LIMIT ? OFFSET ?`
+    ).all(...params, pageSize, offset);
+    rows.forEach(r => { r.displayName = computeDisplayName(r.channel_name, r.device_name, r.name); });
 
     const tagIds = rows.map((r) => r.id);
     const tbMap = new Map();

@@ -101,13 +101,15 @@ function renderLiveFetchTable() {
       <span id="apiFetchSaveStatus-${currentLiveSource}" class="muted"></span>
     </div>
     <span id="liveFetchStatus" class="muted"></span>
-  `;
-  $('#saveApiFetchConfig-' + currentLiveSource)?.addEventListener('click', async () => {
+  `;    $('#saveApiFetchConfig-' + currentLiveSource)?.addEventListener('click', async () => {
     const interval = Number($('#apiFetchInterval-' + currentLiveSource).value) || 10000;
     $('#apiFetchSaveStatus-' + currentLiveSource).textContent = 'Đang lưu...';
     await saveApiFetchConfig(configKey, { fetch_interval_ms: interval });
     $('#apiFetchSaveStatus-' + currentLiveSource).textContent = 'Đã lưu';
     setTimeout(() => { $('#apiFetchSaveStatus-' + currentLiveSource).textContent = ''; }, 1500);
+    // Restart polling với chu kỳ mới
+    stopLiveFetchPolling();
+    startLiveFetchPolling();
   });
 
   $('#liveFetchConfigBar').style.display = 'flex';
@@ -118,7 +120,7 @@ function renderLiveFetchTable() {
     const key = item.tag_name;
     const metrics = item.rawData || {};
     Object.entries(metrics).forEach(([metric, value]) => {
-      allRows.push({ rowIdx, idx, key, metric, value, fullKey: `${key}_${metric}` });
+      allRows.push({ rowIdx, idx, key, metric, value, fullKey: `${key}.${metric}` });
       rowIdx++;
     });
   });
@@ -228,7 +230,10 @@ async function selectLiveSource(key) {
 function startLiveFetchPolling() {
   if (liveFetchTimer) return;
   loadLiveFetch();
-  liveFetchTimer = setInterval(loadLiveFetch, 10000);
+  // Dùng chu kỳ fetch đã cấu hình (hoặc 10s mặc định)
+  const configKey = getConfigKey(currentLiveSource);
+  const interval = apiFetchConfigs[configKey]?.fetch_interval_ms || 10000;
+  liveFetchTimer = setInterval(loadLiveFetch, Math.max(interval, 2000));
 }
 
 function stopLiveFetchPolling() {

@@ -13,7 +13,8 @@ function renderTree() {
   const tbDevices = state.tbDevices.filter((tb) => !filter || tb.name.toLowerCase().includes(filter));
   tbSection.innerHTML = `
     <div class="tree-channel-row" data-channel="__tb__">
-      <span class="tree-channel-name">THINGSBOARD DEVICES</span>
+      <span class="tree-channel-toggle">▶</span>
+      <span class="tree-channel-name">THINGSBOARD DEVICES</span>      
       <button class="tree-channel-actions" title="Thêm thiết bị TB">+</button>
     </div>
   `;

@@ -32,11 +32,18 @@ function syncSourcesFromExpression(customTagId, expression, db, helpers) {
   const devMap = new Map(devices.map(d => [d.id, d]));
   const chMap = new Map(channels.map(c => [c.id, c]));
   const tagRefMap = new Map();
+  function exprSafe(str) {
+    return String(str == null ? '' : str).replace(/[^a-zA-Z0-9_.]/g, '_');
+  }
   tags.forEach(t => {
     const dev = devMap.get(t.device_id);
     const ch = dev ? chMap.get(dev.channel_id) : null;
-    const ref = ch && dev ? helpers.makeTagRef(ch.name, dev.name, t.name, t.id) : helpers.makeTagRef('', '', t.name, t.id);
-    tagRefMap.set(ref, t.id);
+    const newRef = ch && dev ? helpers.makeTagRef(ch.name, dev.name, t.name) : helpers.makeTagRef('', '', t.name);
+    const legacyRef = ch && dev
+      ? `${exprSafe(ch.name)}.${exprSafe(dev.name)}.${exprSafe(t.name)}.${t.id}`
+      : `${exprSafe(t.name)}.${t.id}`;
+    tagRefMap.set(newRef, t.id);
+    tagRefMap.set(legacyRef, t.id);
   });
   const dbApiKeys = db.prepare('SELECT DISTINCT api_key FROM api_tb_mappings').all().map(r => r.api_key);
   const knownApiKeys = new Set([...dbApiKeys, ...helpers.getKnownApiKeys()]);
@@ -165,11 +172,10 @@ function register(app, db, helpers) {
     const tagOptions = tags.map(t => {
       const dev = devMap.get(t.device_id);
       const ch = dev ? chMap.get(dev.channel_id) : null;
-      const fullName = ch && dev ? `${ch.name}.${dev.name}.${t.name}` : t.name;
       const ref = ch && dev
-        ? helpers.makeTagRef(ch.name, dev.name, t.name, t.id)
-        : helpers.makeTagRef('', '', t.name, t.id);
-      return { type: 'tag', id: t.id, name: t.name, fullName, ref };
+        ? helpers.makeTagRef(ch.name, dev.name, t.name)
+        : helpers.makeTagRef('', '', t.name);
+      return { type: 'tag', id: t.id, name: t.name, fullName: ref, ref };
     });
     const dbApiKeys = db.prepare('SELECT DISTINCT api_key FROM api_tb_mappings').all().map(r => r.api_key);
     const apiKeys = [...new Set([...dbApiKeys, ...helpers.getKnownApiKeys()])];

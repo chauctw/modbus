@@ -50,9 +50,14 @@ function removeVietnameseTones(str) {
   return s;
 }
 
+// Sanitize each part separately and join with '.' to maintain [Channel].[Device].[Tag] structure.
+// Handles both dot-separated and underscore-separated input.
+function sanitizePart(str) {
+  return removeVietnameseTones(str).replace(/[^a-zA-Z0-9]/g, '');
+}
+
 function sanitizeTbKey(key) {
-  const noTone = removeVietnameseTones(key);
-  return noTone.replace(/[^a-zA-Z0-9_\-\.]/g, '_').replace(/[_\-\.]+/g, '_').replace(/^_|_$/g, '');
+  return key.split(/[._]/).filter(Boolean).map(sanitizePart).filter(Boolean).join('.');
 }
 
 // Sinh định danh an toàn để dùng làm tên biến trong biểu thức custom tag.
@@ -62,14 +67,21 @@ function exprSafe(str) {
   return String(str == null ? '' : str).replace(/[^a-zA-Z0-9_.]/g, '_');
 }
 
-// Định danh duy nhất cho 1 tag Modbus: channel.device.tag.ID (ID đảm bảo không trùng)
-function makeTagRef(channelName, deviceName, tagName, tagId) {
+// Định danh duy nhất cho 1 tag Modbus: [channel].[device].[tag]
+// Chỉ giữ lại chữ/số/dấu chấm, bỏ dấu tiếng Việt và khoảng trắng.
+function makeTagRef(channelName, deviceName, tagName) {
+  return [channelName, deviceName, tagName].filter(Boolean).map(sanitizePart).join('.');
+}
+
+// Định danh cũ (legacy) dùng cho custom tag expressions đã lưu trước đó.
+// Giữ lại chữ/số/_/. , thay ký tự khác bằng '_'.
+function makeLegacyTagRef(channelName, deviceName, tagName, tagId) {
   return `${exprSafe(channelName)}.${exprSafe(deviceName)}.${exprSafe(tagName)}.${tagId}`;
 }
 
 // Định danh duy nhất cho 1 custom tag: name.ID
 function makeCustomTagRef(name, id) {
-  return `${exprSafe(name)}.${id}`;
+  return `${sanitizePart(name)}.${id}`;
 }
 
 function channelWithCounts(ch) {
@@ -105,6 +117,7 @@ const helpers = {
   channelWithCounts,
   deviceWithCounts,
   sanitizeTbKey,
+  sanitizePart,
   exprSafe,
   makeTagRef,
   makeCustomTagRef,
@@ -119,7 +132,7 @@ require('./routes/auth')(app, db);
 require('./routes/users')(app, db);
 require('./routes/channels')(app, db, helpers);
 require('./routes/devices')(app, db, helpers);
-require('./routes/tags')(app, db);
+require('./routes/tags')(app, db, helpers);
 require('./routes/thingsboard')(app, db);
 require('./routes/custom-tags')(app, db, helpers);
 require('./routes/api')(app, db);
@@ -140,9 +153,9 @@ async function uploadToThingsBoard(tbDevice, tags, isAttributes) {
     if (typeof value === 'boolean') value = value ? 'true' : 'false';
     else if (typeof value === 'bigint') value = value.toString();
     else if (typeof value === 'number' && (!Number.isFinite(value))) return;
-    let key = sanitizeTbKey(`${tag.channel_name || ''}_${tag.device_name || ''}_${tag.name}`);
+    let key = sanitizeTbKey(`${tag.channel_name || ''}.${tag.device_name || ''}.${tag.name}`);
     if (!key) key = `tag_${tag.id}`;
-    if (Object.prototype.hasOwnProperty.call(payload, key)) key = `${key}_${tag.id}`;
+    if (Object.prototype.hasOwnProperty.call(payload, key)) key = `${key}.${tag.id}`;
     payload[key] = value;
   });
   if (!Object.keys(payload).length) return;
@@ -345,7 +358,7 @@ async function processApiThingsBoardUploads() {
     allData.forEach(item => {
       const metrics = item.rawData || {};
       Object.entries(metrics).forEach(([metric, value]) => {
-        const key = `${item.tag_name}_${metric}`;
+        const key = `${item.tag_name}.${sanitizePart(metric)}`;
         dataMap.set(key, value);
         tagValueCache.set(`api:${key}`, value);
         apiKeysKnown.add(key);
@@ -466,13 +479,16 @@ async function evaluateCustomTags() {
     if (missingApiKeys.length) {
       try {
         const { fetchCleanWaterLive, fetchRawWaterLive, fetchViwaterLive } = require('./live_fetchers');
+        const ctConfigs = getApiFetchConfigs();
         const [cleanWater, rawWater, viwater] = await Promise.all([
-          fetchCleanWaterLive(10000), fetchRawWaterLive(10000), fetchViwaterLive(10000),
+          fetchCleanWaterLive(ctConfigs.clean_water?.fetch_interval_ms || 10000),
+          fetchRawWaterLive(ctConfigs.raw_water?.fetch_interval_ms || 10000),
+          fetchViwaterLive(ctConfigs.viwater?.fetch_interval_ms || 10000),
         ]);
         [...cleanWater, ...rawWater, ...viwater].forEach(item => {
           const metrics = item.rawData || {};
           Object.entries(metrics).forEach(([metric, value]) => {
-            const key = `${item.tag_name}_${metric}`;
+            const key = `${item.tag_name}.${sanitizePart(metric)}`;
             if (missingApiKeys.includes(key)) {
               tagValueCache.set(`api:${key}`, value);
               apiKeysKnown.add(key);
@@ -491,8 +507,17 @@ async function evaluateCustomTags() {
         let refName = null;
         if (src.source_type === 'tag' && src.source_tag_id != null) {
           const info = tagInfoMap.get(src.source_tag_id);
-          refName = info ? helpers.makeTagRef(info.channel_name, info.device_name, info.tag_name, src.source_tag_id) : `tag_${src.source_tag_id}`;
-          ctx[refName] = tagValueCache.get(`tag:${src.source_tag_id}`);
+          if (info) {
+            const newRef = helpers.makeTagRef(info.channel_name, info.device_name, info.tag_name);
+            const legacyRef = makeLegacyTagRef(info.channel_name, info.device_name, info.tag_name, src.source_tag_id);
+            const val = tagValueCache.get(`tag:${src.source_tag_id}`);
+            ctx[newRef] = val;
+            ctx[legacyRef] = val;
+            refName = newRef;
+          } else {
+            refName = `tag_${src.source_tag_id}`;
+            ctx[refName] = tagValueCache.get(`tag:${src.source_tag_id}`);
+          }
         } else if (src.source_type === 'api_key' && src.source_api_key) {
           refName = src.source_api_key;
           ctx[refName] = tagValueCache.get(`api:${src.source_api_key}`);

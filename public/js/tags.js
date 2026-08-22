@@ -36,7 +36,7 @@ async function loadTags() {
      tr.innerHTML = `
        <td><input type="checkbox" class="row-check" ${state.selected.has(tag.id) ? 'checked' : ''} /></td>
        <td class="muted">${stt}</td>
-       <td><input type="text" class="cell-name" value="${escapeHtml(tag.name)}" title="${escapeHtml(tag.name)}" /></td>
+       <td><input type="text" class="cell-name" value="${escapeHtml(tag.displayName || tag.name)}" title="${escapeHtml(tag.displayName || tag.name)}" readonly /></td>
        <td><input type="text" class="cell-address" value="${escapeHtml(tag.address || '')}" title="${escapeHtml(tag.address || '')}" /></td>
        <td>
          <select class="cell-datatype">
@@ -111,11 +111,11 @@ async function loadTags() {
     });
     tr.querySelector('.edit-btn').addEventListener('click', () => openTagForm(tag));
     tr.querySelector('.del-btn').addEventListener('click', async () => {
-      if (!confirm(`Xoá tag "${tag.name}"?`)) return;
+      if (!confirm(`Xoá tag "${tag.displayName || tag.name}"?`)) return;
       await api(`/api/tags/${tag.id}`, { method: 'DELETE' });
       await loadTags(); await loadTree(); await loadDashboard();
     });
-    ['cell-name', 'cell-address', 'cell-datatype', 'cell-rw'].forEach((cls) => {
+    ['cell-address', 'cell-datatype', 'cell-rw'].forEach((cls) => {
       const el = tr.querySelector('.' + cls);
       if (el) {
         el.addEventListener('change', () => saveInlineEdit(tag.id, tr));
@@ -134,7 +134,7 @@ async function openTbDeviceSelect(tag) {
   const mappedIds = new Set(mapped.map((m) => m.id));
   const inherited = (tag.tb_devices || []).filter((tb) => tb.inherited);
   const html = `
-    <h3>Thiết bị ThingsBoard cho tag: ${escapeHtml(tag.name)}</h3>
+    <h3>Thiết bị ThingsBoard cho tag: ${escapeHtml(tag.displayName || tag.name)}</h3>
     ${inherited.length ? `<p class="muted">Tag này đã tự động gửi tới <b>${inherited.map((tb) => escapeHtml(tb.name)).join(', ')}</b> theo cấu hình mặc định của Device (không cần chọn lại bên dưới). Chỉ chọn thêm nếu muốn gửi tới thiết bị KHÁC nữa.</p>` : ''}
     <div id="tb-list">
       ${tbDevices.length === 0 ? '<p class="muted">Chưa có thiết bị ThingsBoard nào. <a href="#" id="addTbHere">Thêm mới</a></p>' : ''}
@@ -171,7 +171,6 @@ async function openTbDeviceSelect(tag) {
 
 async function saveInlineEdit(id, tr) {
   const body = {
-    name: tr.querySelector('.cell-name').value,
     address: tr.querySelector('.cell-address').value,
     data_type: Number(tr.querySelector('.cell-datatype').value),
     rw_access: Number(tr.querySelector('.cell-rw').value),

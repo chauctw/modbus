@@ -290,4 +290,42 @@ if (userCount === 0) {
   db.prepare('INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)').run('admin', hash, 'admin');
 }
 
+// Migration: Normalize old API keys in api_tb_mappings and custom_tag_sources
+// Old format: CTN_NUOCSACH_VPCTY_Clo → New format: NUOCSACH.VPCTY.CLO
+(function migrateApiKeys() {
+  function normalizeKey(str) {
+    if (!str) return str;
+    let s = String(str).normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    s = s.replace(/đ/g, 'd').replace(/Đ/g, 'D');
+    s = s.replace(/^CTN_/i, '');
+    return s.split('_').filter(Boolean).map(p => p.replace(/[^a-zA-Z0-9.]/g, '').toUpperCase()).filter(Boolean).join('.');
+  }
+  // Normalize api_tb_mappings
+  const mappings = db.prepare('SELECT id, api_key FROM api_tb_mappings').all();
+  const updMapping = db.prepare('UPDATE api_tb_mappings SET api_key=? WHERE id=?');
+  const insMapping = db.prepare('INSERT OR IGNORE INTO api_tb_mappings (api_key, tb_device_id, enabled, telemetry_enabled, attributes_enabled, telemetry_interval_ms, attributes_interval_ms) SELECT ?, tb_device_id, enabled, telemetry_enabled, attributes_enabled, telemetry_interval_ms, attributes_interval_ms FROM api_tb_mappings WHERE id=?');
+  mappings.forEach(m => {
+    const norm = normalizeKey(m.api_key);
+    if (norm !== m.api_key) {
+      // Check if normalized key already exists
+      const existing = db.prepare('SELECT id FROM api_tb_mappings WHERE api_key=?').get(norm);
+      if (existing) {
+        // Delete old entry, normalized already exists
+        db.prepare('DELETE FROM api_tb_mappings WHERE id=?').run(m.id);
+      } else {
+        updMapping.run(norm, m.id);
+      }
+    }
+  });
+  // Normalize custom_tag_sources
+  const sources = db.prepare('SELECT id, source_api_key FROM custom_tag_sources WHERE source_type=?').all('api_key');
+  const updSource = db.prepare('UPDATE custom_tag_sources SET source_api_key=? WHERE id=?');
+  sources.forEach(s => {
+    const norm = normalizeKey(s.source_api_key);
+    if (norm !== s.source_api_key) {
+      updSource.run(norm, s.id);
+    }
+  });
+})();
+
 module.exports = db;
